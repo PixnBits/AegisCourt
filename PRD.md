@@ -1,5 +1,11 @@
-**Lean PRD – AegisCourt: Constitutional Self-Evolving Agent Framework**  
-**Version:** 0.3 (PM + Architect review – March 14, 2026)  
+---
+title: AegisCourt Product Requirements Document
+version: 0.3
+date: 2026-03-14
+status: Draft – Architect-reviewed
+---
+
+**Lean PRD – AegisCourt: Constitutional Self-Evolving Agent Framework**
 
 ### 1. Executive Summary / Product Vision
 AegisCourt is a paranoid-by-design, open-source agentic framework. It begins with a minimal, cryptographically signed, immutable constitutional seed kernel that enforces strict isolation between agents, skills, and the host system. Agents can propose self-modifications (new behaviors, memory schemas, tool integrations) but **only** through an always-active Governance Court that simulates full enterprise review (CISO, MRM, Compliance, etc.).
@@ -102,11 +108,9 @@ All communication through kernel-mediated channels only. No direct agent-to-agen
 - **Ongoing:** Refine constitution from real usage; track NIST updates.
 
 ### 12. Open Questions & Next Steps
-- Confirm isolation tech for MVP (gVisor vs. lightweight containerd)?  
-- Expand starter constitution to 10 rules?  
+- Confirm isolation tech for MVP (gVisor vs. lightweight containerd vs. firejail/seccomp)?
+- Expand starter constitution to 10 rules?
 - Generate seed kernel code skeleton from this architecture?
-- Initial default constitution ruleset (e.g., "Never allow cross-agent memory sharing without explicit Court approval & isolation boundary")?  
-- Number of default simulated reviewer personas (start with 4–6 matching key enterprise roles)?  
-- Preferred isolation tech in MVP (e.g., gVisor sandbox, firejail, or lightweight containers)?  
-- Exact "About Me" questions + how they map to Court thresholds.  
+- Number of default simulated reviewer personas (start with 4–6 matching key enterprise roles)?
+- Exact "About Me" questions + how they map to Court thresholds.
 - First dogfood self-mod example (e.g., agent proposing its own better tool-calling prompt)?
