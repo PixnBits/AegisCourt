@@ -11,7 +11,7 @@ Check:
 Output JSON:
 ```json
 {
-  "persona": "MRM",
+  "persona": "Compliance & Regulatory",
   "drift_risk": "None/Low/Medium/High",
   "explainability_impact": "...",
   "evaluation_gaps": ["..."],
