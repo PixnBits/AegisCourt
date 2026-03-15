@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -39,11 +40,12 @@ type Proposal struct {
 
 // CourtDecision is the aggregated result from the Governance Court.
 type CourtDecision struct {
-	ProposalID      string   `json:"proposal_id"`
-	AggregateScore  float64  `json:"aggregate_score"`
-	Approved        bool     `json:"approved"`
-	Conditions      []string `json:"conditions,omitempty"`
-	RejectionReason string   `json:"rejection_reason,omitempty"`
+	ProposalID        string             `json:"proposal_id"`
+	AggregateScore    float64            `json:"aggregate_score"`
+	Approved          bool               `json:"approved"`
+	Conditions        []string           `json:"conditions,omitempty"`
+	RejectionReason   string             `json:"rejection_reason,omitempty"`
+	ReviewerResponses []ReviewerResponse `json:"reviewer_responses,omitempty"`
 }
 
 // KernelConfig holds runtime configuration (loaded from file + env).
@@ -115,7 +117,22 @@ func (e *CourtEngineImpl) ReviewProposal(ctx context.Context, prop Proposal) (Co
 			continue
 		}
 
-		prompt := template + "\n\nProposal Description:\n" + prop.Description + "\n\nProposed Diff:\n" + string(prop.Diff) + "\n\nOutput ONLY valid JSON matching the format shown at the bottom of the template."
+		// Extract version from constitution (first line)
+		version := "v0.1" // default
+		if lines := strings.Split(e.constitution, "\n"); len(lines) > 0 {
+			if strings.Contains(lines[0], "v") {
+				version = strings.TrimSpace(strings.Split(lines[0], "v")[1])
+				if idx := strings.Index(version, " "); idx > 0 {
+					version = "v" + version[:idx]
+				} else {
+					version = "v" + version
+				}
+			}
+		}
+
+		constitutionHeader := fmt.Sprintf("You are the %s reviewer in AegisCourt.\nThe current constitution (%s) is:\n\n%s\n\nEvaluate the following proposal strictly against the constitution rules, especially the Absolute and High-Priority ones.\n\n", persona, version, e.constitution)
+
+		prompt := constitutionHeader + template + "\n\nProposal Description:\n" + prop.Description + "\n\nProposed Diff:\n" + string(prop.Diff) + "\n\nOutput ONLY valid JSON matching the format shown at the bottom of the template."
 
 		response, err := e.router.Dispatch(ctx, prompt, "llama3.2")
 		if err != nil {
@@ -155,10 +172,11 @@ func (e *CourtEngineImpl) ReviewProposal(ctx context.Context, prop Proposal) (Co
 
 	approved := avgScore >= threshold
 	decision := CourtDecision{
-		ProposalID:     prop.ID,
-		AggregateScore: avgScore,
-		Approved:       approved,
-		Conditions:     allConditions,
+		ProposalID:        prop.ID,
+		AggregateScore:    avgScore,
+		Approved:          approved,
+		Conditions:        allConditions,
+		ReviewerResponses: responses,
 	}
 	if !approved {
 		decision.RejectionReason = "Aggregate score below threshold"
@@ -628,48 +646,84 @@ func (k *Kernel) VerifySignature(data, sig []byte) bool {
 	return ed25519.Verify(k.publicKey, data, sig)
 }
 
-// SubmitProposal is the entry point for agent-proposed changes.
-func (k *Kernel) SubmitProposal(ctx context.Context, desc string, diff json.RawMessage) error {
+// ReviewProposal performs court review without applying.
+func (k *Kernel) ReviewProposal(ctx context.Context, desc string, diff json.RawMessage) (CourtDecision, error) {
 	prop := Proposal{
 		ID:          uuid.New().String(),
 		Timestamp:   time.Now().UTC(),
 		Diff:        diff,
 		Description: desc,
-		Proposer:    "agent-runtime", // TODO: real agent ID
+		Proposer:    "user", // or agent
 	}
 
 	propBytes, err := json.Marshal(prop)
 	if err != nil {
-		return err
+		return CourtDecision{}, err
 	}
 
-	// Immediate audit log (before any processing)
+	// Audit the proposal
 	if err := k.auditStore.Append(propBytes); err != nil {
-		return fmt.Errorf("audit append failed: %w", err)
+		return CourtDecision{}, fmt.Errorf("audit append failed: %w", err)
 	}
 
-	// Activate Governance Court
 	decision, err := k.courtEngine.ReviewProposal(ctx, prop)
+	if err != nil {
+		return CourtDecision{}, err
+	}
+
+	// Audit the decision
+	decisionBytes, _ := json.Marshal(map[string]interface{}{
+		"event":     "court_decision",
+		"proposal_id": prop.ID,
+		"decision":  decision,
+		"timestamp": time.Now().UTC(),
+	})
+	k.auditStore.Append(decisionBytes)
+
+	return decision, nil
+}
+
+// SubmitProposal is the entry point for agent-proposed changes.
+func (k *Kernel) SubmitProposal(ctx context.Context, desc string, diff json.RawMessage) error {
+	decision, err := k.ReviewProposal(ctx, desc, diff)
 	if err != nil {
 		return err
 	}
 
 	if !decision.Approved {
-		log.Printf("Proposal %s rejected: %s", prop.ID, decision.RejectionReason)
+		log.Printf("Proposal %s rejected: %s", decision.ProposalID, decision.RejectionReason)
 		return fmt.Errorf("court rejected: %s", decision.RejectionReason)
 	}
 
 	// Apply the approved proposal
-	if err := k.ApplyApproved(decision, prop); err != nil {
+	if err := k.ApplyApproved(decision, Proposal{ID: decision.ProposalID, Diff: diff, Description: desc}); err != nil {
 		return fmt.Errorf("apply failed: %w", err)
 	}
 
-	log.Printf("Proposal %s approved with conditions: %v", prop.ID, decision.Conditions)
+	log.Printf("Proposal %s approved with conditions: %v", decision.ProposalID, decision.Conditions)
 	return nil
 }
 
 // ApplyApproved applies the approved proposal.
 func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
+	// Auto-backup current state
+	versionsDir := filepath.Join(k.config.DataDir, "versions")
+	os.MkdirAll(versionsDir, 0700)
+
+	// Save last-before
+	lastBeforePath := filepath.Join(versionsDir, "last-before.json")
+	if strings.Contains(string(prop.Diff), "constitution") {
+		currentJSON, _ := json.Marshal(map[string]interface{}{"content": k.constitution})
+		os.WriteFile(lastBeforePath, currentJSON, 0600)
+	} else {
+		currentJSON, _ := json.Marshal(k.config)
+		os.WriteFile(lastBeforePath, currentJSON, 0600)
+	}
+
+	// Record last applied ID
+	lastAppliedPath := filepath.Join(versionsDir, "last-applied.txt")
+	os.WriteFile(lastAppliedPath, []byte(prop.ID), 0600)
+
 	// For MVP, assume diff is JSON Patch for constitution or config
 	// Determine target: if diff contains "constitution", modify constitution, else config
 
@@ -729,6 +783,78 @@ func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
 	}
 	appliedBytes, _ := json.Marshal(appliedEntry)
 	return k.auditStore.Append(appliedBytes)
+}
+
+// InteractiveCourtReview handles user Q&A before final vote.
+func InteractiveCourtReview(kernel *Kernel, decision CourtDecision, prop Proposal) (string, error) {
+	fmt.Printf("\nGovernance Court Results (Aggregate: %.1f/100)\n", decision.AggregateScore)
+	fmt.Printf("Approved: %v\n", decision.Approved)
+	if len(decision.Conditions) > 0 {
+		fmt.Println("Conditions:")
+		for _, c := range decision.Conditions {
+			fmt.Printf("  - %s\n", c)
+		}
+	}
+	fmt.Println("\nFull reviewer details available. Ask questions? (y/n or type question)")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		input := strings.TrimSpace(scanner.Text())
+		if input == "" || input == "n" || input == "no" {
+			break
+		}
+		if input == "y" || input == "yes" {
+			fmt.Println("Ask your question (or 'done' to finish):")
+			continue
+		}
+		if strings.ToLower(input) == "done" {
+			break
+		}
+
+		// Parse question, e.g. "ask ciso: why syscall concern?"
+		persona := "all" // default
+		question := input
+		if strings.Contains(input, ":") {
+			parts := strings.SplitN(input, ":", 2)
+			persona = strings.TrimSpace(parts[0])
+			question = strings.TrimSpace(parts[1])
+		}
+
+		// Find the reviewer response
+		var resp *ReviewerResponse
+		for _, r := range decision.ReviewerResponses {
+			if strings.EqualFold(r.Persona, persona) || persona == "all" {
+				resp = &r
+				break
+			}
+		}
+		if resp == nil {
+			fmt.Println("Reviewer not found.")
+			continue
+		}
+
+		prompt := fmt.Sprintf("You are the %s reviewer who gave this opinion: %s\n\nUser asks: %s\n\nAnswer concisely and factually.", resp.Persona, fmt.Sprintf("%+v", *resp), question)
+		answer, err := kernel.llmRouter.Dispatch(context.Background(), prompt, "llama3.2")
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			continue
+		}
+		fmt.Printf("[%s]: %s\n", resp.Persona, answer)
+		fmt.Println("Ask another question or 'done':")
+	}
+
+	fmt.Println("\nFinal vote: [Approve] [Reject] [Defer 24h] [More Q&A]")
+	for scanner.Scan() {
+		vote := strings.ToLower(strings.TrimSpace(scanner.Text()))
+		if vote == "approve" || vote == "reject" || vote == "defer" {
+			return vote, nil
+		}
+		if vote == "more" || vote == "q&a" {
+			return InteractiveCourtReview(kernel, decision, prop)
+		}
+		fmt.Println("Please enter: approve, reject, defer, or more")
+	}
+	return "defer", nil // default
 }
 
 // Rollback reverts to a previous state.
@@ -814,6 +940,9 @@ func main() {
 	proposeDesc := flag.String("propose-desc", "", "description for propose command")
 	proposeDiff := flag.String("propose-diff", "", "diff JSON for propose command")
 	withAgent := flag.Bool("with-agent", false, "spawn simple agent")
+	interactiveCourt := flag.Bool("interactive-court", false, "enable interactive court Q&A")
+	withAgentLoop := flag.Bool("with-agent-loop", false, "spawn simple agent loop")
+	jsonOutputCourt := flag.Bool("json-output-court", false, "output court decision as JSON")
 	flag.Parse()
 
 	kernel, err := NewKernel(*configPath)
@@ -836,6 +965,15 @@ func main() {
 				// Run agent once for demo
 				if err := agent.RunOnce(ctx); err != nil {
 					log.Printf("Agent run failed: %v", err)
+				}
+			}()
+		}
+
+		if *withAgentLoop {
+			agent := NewSimpleAgent(kernel)
+			go func() {
+				if err := agent.RunLoop(ctx); err != nil {
+					log.Printf("Agent loop failed: %v", err)
 				}
 			}()
 		}
@@ -875,10 +1013,52 @@ func main() {
 		var diff json.RawMessage
 		json.Unmarshal(diffData, &diff)
 		ctx := context.Background()
-		if err := kernel.SubmitProposal(ctx, *desc, diff); err != nil {
-			log.Fatalf("submit proposal: %v", err)
+		decision, err := kernel.ReviewProposal(ctx, *desc, diff)
+		if err != nil {
+			log.Fatalf("review proposal: %v", err)
 		}
-		log.Println("Proposal submitted successfully")
+		if *jsonOutputCourt {
+			jsonBytes, _ := json.MarshalIndent(decision, "", "  ")
+			fmt.Println(string(jsonBytes))
+		} else {
+			fmt.Printf("Court Decision:\n")
+			fmt.Printf("  Aggregate Score: %.1f/100\n", decision.AggregateScore)
+			fmt.Printf("  Approved: %v\n", decision.Approved)
+			if decision.RejectionReason != "" {
+				fmt.Printf("  Rejection Reason: %s\n", decision.RejectionReason)
+			}
+			if len(decision.Conditions) > 0 {
+				fmt.Println("  Conditions:")
+				for _, c := range decision.Conditions {
+					fmt.Printf("    - %s\n", c)
+				}
+			}
+			fmt.Println("  Reviewer Responses:")
+			for _, r := range decision.ReviewerResponses {
+				fmt.Printf("    %s: Score %d, %s", r.Persona, r.Score, r.Recommendation)
+				if len(r.Cons) > 0 {
+					fmt.Printf(" (Concerns: %v)", r.Cons)
+				}
+				fmt.Println()
+			}
+		}
+		prop := Proposal{ID: decision.ProposalID, Diff: diff, Description: *desc}
+		if *interactiveCourt {
+			vote, err := InteractiveCourtReview(kernel, decision, prop)
+			if err != nil {
+				log.Fatalf("interactive review: %v", err)
+			}
+			if vote != "approve" {
+				log.Printf("User voted: %s", vote)
+				return
+			}
+		} else if !decision.Approved {
+			log.Fatalf("Court rejected: %s", decision.RejectionReason)
+		}
+		if err := kernel.ApplyApproved(decision, prop); err != nil {
+			log.Fatalf("apply proposal: %v", err)
+		}
+		log.Println("Proposal applied successfully")
 	case "emergency-halt":
 		kernel.EmergencyHalt()
 		log.Println("Emergency halt triggered")
@@ -893,6 +1073,30 @@ func main() {
 		for _, entry := range history {
 			fmt.Println(string(entry))
 		}
+	case "rollback-last":
+		versionsDir := filepath.Join(kernel.config.DataDir, "versions")
+		lastAppliedPath := filepath.Join(versionsDir, "last-applied.txt")
+		idBytes, err := os.ReadFile(lastAppliedPath)
+		if err != nil {
+			log.Fatalf("no last applied proposal: %v", err)
+		}
+		proposalID := strings.TrimSpace(string(idBytes))
+		backupPath := filepath.Join(versionsDir, proposalID+".json")
+		data, err := os.ReadFile(backupPath)
+		if err != nil {
+			log.Fatalf("backup not found: %v", err)
+		}
+		fmt.Printf("Will rollback to proposal %s. Backup data:\n%s\nConfirm? (y/n): ", proposalID, string(data))
+		var confirm string
+		fmt.Scanln(&confirm)
+		if confirm != "y" && confirm != "yes" {
+			log.Println("Rollback cancelled")
+			return
+		}
+		if err := kernel.Rollback(proposalID); err != nil {
+			log.Fatalf("rollback failed: %v", err)
+		}
+		log.Println("Rollback completed")
 	default:
 		log.Fatalf("unknown command: %s", *command)
 	}
