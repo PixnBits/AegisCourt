@@ -53,16 +53,16 @@ type CourtDecision struct {
 
 // KernelConfig holds runtime configuration (loaded from file + env).
 type KernelConfig struct {
-	DataDir             string   `json:"data_dir"`
-	ConstitutionPath    string   `json:"constitution_path"`
-	LLMEndpoints        []string `json:"llm_endpoints"` // e.g. ["http://localhost:11434", "https://api.groq.com"]
-	AboutMe             AboutMe  `json:"about_me"`
-	Debug               bool     `json:"debug"`
-	MaxSandboxMemoryMB  int      `json:"max_sandbox_memory_mb"`
-	MaxSandboxCPU       float64  `json:"max_sandbox_cpu"`
-	AllowedSyscalls     []string `json:"allowed_syscalls"`
-	SecondaryModel      string   `json:"secondary_model"`       // e.g. "llama2:13b"
-	CrossCheckEnabled   bool     `json:"cross_check_enabled"`
+	DataDir            string   `json:"data_dir"`
+	ConstitutionPath   string   `json:"constitution_path"`
+	LLMEndpoints       []string `json:"llm_endpoints"` // e.g. ["http://localhost:11434", "https://api.groq.com"]
+	AboutMe            AboutMe  `json:"about_me"`
+	Debug              bool     `json:"debug"`
+	MaxSandboxMemoryMB int      `json:"max_sandbox_memory_mb"`
+	MaxSandboxCPU      float64  `json:"max_sandbox_cpu"`
+	AllowedSyscalls    []string `json:"allowed_syscalls"`
+	SecondaryModel     string   `json:"secondary_model"` // e.g. "llama2:13b"
+	CrossCheckEnabled  bool     `json:"cross_check_enabled"`
 }
 
 // AboutMe captures user risk profile (calibrates Court strictness).
@@ -88,11 +88,11 @@ type AgentInstance struct {
 }
 
 type SandboxHandle struct {
-	ID         string
-	StartedAt  time.Time
-	AgentID    string
-	LastCmd    string
-	Status     string // "running", "exited", "killed"
+	ID        string
+	StartedAt time.Time
+	AgentID   string
+	LastCmd   string
+	Status    string // "running", "exited", "killed"
 }
 
 type RecentProposal struct {
@@ -112,18 +112,18 @@ type LLMEndpointStatus struct {
 }
 
 type DeferredProposal struct {
-	Proposal     Proposal
-	Decision     CourtDecision
-	Expiry       time.Time
-	Reason       string
+	Proposal Proposal
+	Decision CourtDecision
+	Expiry   time.Time
+	Reason   string
 }
 
 type Provenance struct {
-	ID         string    `json:"id"`
-	CreatedAt  time.Time `json:"created_at"`
-	ParentID   string    `json:"parent_id,omitempty"` // if spawned from another
-	Purpose    string    `json:"purpose"`
-	Signature  string    `json:"signature"` // signed by kernel
+	ID        string    `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	ParentID  string    `json:"parent_id,omitempty"` // if spawned from another
+	Purpose   string    `json:"purpose"`
+	Signature string    `json:"signature"` // signed by kernel
 }
 
 // Sandbox interface (to be implemented with gVisor, seccomp fallback, etc.)
@@ -190,10 +190,10 @@ func (t *ToolProxyImpl) ProxyHTTP(ctx context.Context, reqURL string, method str
 	// Audit the call
 	if t.auditStore != nil {
 		entry := map[string]interface{}{
-			"type":    "tool_proxy_http",
-			"url":     reqURL,
-			"method":  method,
-			"headers": headers,
+			"type":     "tool_proxy_http",
+			"url":      reqURL,
+			"method":   method,
+			"headers":  headers,
 			"body_len": len(body),
 		}
 		entryBytes, _ := json.Marshal(entry)
@@ -348,7 +348,7 @@ func (e *CourtEngineImpl) ReviewProposal(ctx context.Context, prop Proposal) (Co
 		}
 
 		var resp ReviewerResponse
-		if err := json.Unmarshal([]byte(response), &resp); err != nil {
+		if err := e.parseReviewerResponse(persona, response, &resp); err != nil {
 			log.Printf("failed to parse response for %s: %v, response: %s", persona, err, response)
 			responses = append(responses, ReviewerResponse{Persona: persona, Score: 50, Recommendation: "Defer"})
 			continue
@@ -408,6 +408,59 @@ func (e *CourtEngineImpl) loadReviewerTemplate(persona string) (string, error) {
 	return string(data), nil
 }
 
+func (e *CourtEngineImpl) parseReviewerResponse(persona, response string, resp *ReviewerResponse) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(response), &raw); err != nil {
+		return err
+	}
+
+	// Extract common fields
+	if score, ok := raw["score"].(float64); ok {
+		resp.Score = int(score)
+	}
+	if rec, ok := raw["recommendation"].(string); ok {
+		resp.Recommendation = rec
+	}
+
+	// Extract cons based on persona
+	switch persona {
+	case "ciso":
+		if concerns, ok := raw["key_concerns"].([]interface{}); ok {
+			for _, c := range concerns {
+				if s, ok := c.(string); ok {
+					resp.Cons = append(resp.Cons, s)
+				}
+			}
+		}
+		if mitigations, ok := raw["required_mitigations"].([]interface{}); ok {
+			for _, m := range mitigations {
+				if s, ok := m.(string); ok {
+					resp.Cons = append(resp.Cons, "Required mitigation: "+s)
+				}
+			}
+		}
+	default: // mrm, compliance-regulatory, helpfulness-evolution, responsible-ai, sre
+		if gaps, ok := raw["evaluation_gaps"].([]interface{}); ok {
+			for _, g := range gaps {
+				if s, ok := g.(string); ok {
+					resp.Cons = append(resp.Cons, s)
+				}
+			}
+		}
+	}
+
+	// Extract pros if available
+	if pros, ok := raw["pros"].([]interface{}); ok {
+		for _, p := range pros {
+			if s, ok := p.(string); ok {
+				resp.Pros = append(resp.Pros, s)
+			}
+		}
+	}
+
+	return nil
+}
+
 // AuditStore provides tamper-evident logging.
 type AuditStore interface {
 	Append(entry json.RawMessage) error
@@ -446,22 +499,22 @@ func (s *GvisorSandbox) Start(ctx context.Context, cmd []string) error {
 	// Assume a base image like alpine for running arbitrary commands
 	image := "alpine:latest"
 	dockerCmd := []string{"docker", "run", "--runtime=runsc", "--rm", "-d", "--name", "aegis-sandbox-" + uuid.New().String()[:8]}
-	
+
 	// Syscall allowlist: Docker run does not directly support runsc syscall filtering via flags.
 	// For full enforcement, a custom runsc profile is required.
 	if len(s.config.AllowedSyscalls) > 0 {
 		log.Printf("Warning: Syscall allowlist configured (%d syscalls), but Docker run does not expose runsc --syscall flag. Using default runsc profile. For stricter sandboxing, configure runsc with a custom profile.", len(s.config.AllowedSyscalls))
 	}
-	
+
 	// Add resource limits
 	if s.config != nil {
 		dockerCmd = append(dockerCmd, "--memory", fmt.Sprintf("%dMB", s.config.MaxSandboxMemoryMB))
 		dockerCmd = append(dockerCmd, "--cpus", fmt.Sprintf("%.1f", s.config.MaxSandboxCPU))
 	}
-	
+
 	dockerCmd = append(dockerCmd, image)
 	dockerCmd = append(dockerCmd, cmd...)
-	
+
 	execCmd := exec.CommandContext(ctx, dockerCmd[0], dockerCmd[1:]...)
 	output, err := execCmd.Output()
 	if err != nil {
@@ -527,20 +580,60 @@ type LLMRouter interface {
 	DispatchWithCrossCheck(ctx context.Context, prompt string, model string, secondModel string) (string, string, float64, error)
 }
 
-// LLMRouterImpl implements LLMRouter with HTTP client to various LLM endpoints.
-type LLMRouterImpl struct {
+// OllamaRouter implements LLMRouter with HTTP client to Ollama endpoints.
+type OllamaRouter struct {
 	endpoints []string
 	client    *http.Client
 }
 
-func NewLLMRouter(endpoints []string) *LLMRouterImpl {
-	return &LLMRouterImpl{
-		endpoints: endpoints,
-		client:    &http.Client{Timeout: 60 * time.Second},
+func NewOllamaRouter(endpoints []string) *OllamaRouter {
+	if len(endpoints) == 0 {
+		endpoints = []string{"http://localhost:11434"} // fallback
+	}
+
+	// Ping endpoints and prefer healthy ones
+	healthy := make([]string, 0, len(endpoints))
+	unhealthy := make([]string, 0, len(endpoints))
+
+	client := &http.Client{Timeout: 60 * time.Second}
+
+	for _, endpoint := range endpoints {
+		if pingEndpoint(client, endpoint) {
+			healthy = append(healthy, endpoint)
+		} else {
+			unhealthy = append(unhealthy, endpoint)
+		}
+	}
+
+	// Prefer healthy endpoints first
+	sortedEndpoints := append(healthy, unhealthy...)
+
+	return &OllamaRouter{
+		endpoints: sortedEndpoints,
+		client:    client,
 	}
 }
 
-func (r *LLMRouterImpl) Dispatch(ctx context.Context, prompt string, model string) (string, error) {
+// pingEndpoint checks if an Ollama endpoint is healthy
+func pingEndpoint(client *http.Client, endpoint string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/api/tags", nil)
+	if err != nil {
+		return false
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == 200
+}
+
+func (r *OllamaRouter) Dispatch(ctx context.Context, prompt string, model string) (string, error) {
 	// Reject flagged models
 	if strings.Contains(strings.ToLower(model), "qwen") {
 		return "", fmt.Errorf("model %s rejected per Constitution Rule 8", model)
@@ -577,7 +670,7 @@ func (r *LLMRouterImpl) Dispatch(ctx context.Context, prompt string, model strin
 	return "", fmt.Errorf("all endpoints failed after retries")
 }
 
-func (r *LLMRouterImpl) checkModelFlags(model string) {
+func (r *OllamaRouter) checkModelFlags(model string) {
 	modelLower := strings.ToLower(model)
 	if strings.Contains(modelLower, "qwen") {
 		log.Printf("Warning: Using flagged model family %s - extra scrutiny recommended per Constitution Rule 8", model)
@@ -596,12 +689,13 @@ func (r *LLMRouterImpl) checkModelFlags(model string) {
 	}
 }
 
-func (r *LLMRouterImpl) detectJailbreak(prompt string) bool {
+func (r *OllamaRouter) detectJailbreak(prompt string) bool {
 	dangerous := []string{
 		"ignore previous",
 		"ignore all previous",
 		"you are now",
 		"enter developer mode",
+		"jailbreak",
 		"dan mode",
 		"uncensored",
 		"unrestricted",
@@ -612,14 +706,13 @@ func (r *LLMRouterImpl) detectJailbreak(prompt string) bool {
 	promptLower := strings.ToLower(prompt)
 	for _, d := range dangerous {
 		if strings.Contains(promptLower, d) {
-			log.Printf("Jailbreak detected: '%s' in prompt", d)
 			return true
 		}
 	}
 	return false
 }
 
-func (r *LLMRouterImpl) tryEndpoint(ctx context.Context, endpoint string, reqBody map[string]interface{}, format string) (string, error) {
+func (r *OllamaRouter) tryEndpoint(ctx context.Context, endpoint string, reqBody map[string]interface{}, format string) (string, error) {
 	data, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(string(data)))
 	if err != nil {
@@ -674,7 +767,7 @@ func (r *LLMRouterImpl) tryEndpoint(ctx context.Context, endpoint string, reqBod
 	return "", fmt.Errorf("unknown format")
 }
 
-func (r *LLMRouterImpl) DispatchWithCrossCheck(ctx context.Context, prompt string, model string, secondModel string) (string, string, float64, error) {
+func (r *OllamaRouter) DispatchWithCrossCheck(ctx context.Context, prompt string, model string, secondModel string) (string, string, float64, error) {
 	// Dispatch to primary model
 	response1, err := r.Dispatch(ctx, prompt, model)
 	if err != nil {
@@ -692,7 +785,7 @@ func (r *LLMRouterImpl) DispatchWithCrossCheck(ctx context.Context, prompt strin
 	return response1, response2, similarity, nil
 }
 
-func (r *LLMRouterImpl) calculateSimilarity(s1, s2 string) float64 {
+func (r *OllamaRouter) calculateSimilarity(s1, s2 string) float64 {
 	// Simple word-based similarity
 	words1 := strings.Fields(strings.ToLower(s1))
 	words2 := strings.Fields(strings.ToLower(s2))
@@ -723,17 +816,13 @@ func min(a, b int) int {
 
 // ReviewerResponse is the JSON output from each reviewer.
 type ReviewerResponse struct {
-	Persona    string   `json:"persona"`
-	Score      int      `json:"score"`
-	Pros       []string `json:"pros"`
-	Cons       []string `json:"cons"`
-	Recommendation string `json:"recommendation"`
+	Persona        string   `json:"persona"`
+	Score          int      `json:"score"`
+	Pros           []string `json:"pros"`
+	Cons           []string `json:"cons"`
+	Recommendation string   `json:"recommendation"`
 	// Additional fields vary by persona
 }
-
-
-
-
 
 // -----------------------------------------------------------------------------
 // Kernel – the immutable root of trust
@@ -878,35 +967,35 @@ func loadConstitution(path string) (string, error) {
 }
 
 type Kernel struct {
-	config       KernelConfig
-	constitution string
-	privateKey   ed25519.PrivateKey // kernel's signing key (generated or loaded)
-	publicKey    ed25519.PublicKey
-	sandboxMgr   Sandbox     // placeholder
-	llmRouter      LLMRouter   // placeholder
-	courtEngine    CourtEngine // placeholder
-	auditStore     AuditStore  // placeholder
-	toolProxy      ToolProxy   // placeholder
-	benchmarkRunner *BenchmarkRunner
-	shutdown     chan struct{}
-	readOnly     bool
-	kernelState *KernelState // structured state
-	activeAgents      map[string]*AgentInstance     // key = agentID
-	activeSandboxes   map[string]*SandboxHandle     // key = containerID or handle
-	recentProposals   []RecentProposal              // ring buffer, keep max 20
-	lastConstitutionHash string                     // hex string, SHA-256 of current constitution
-	llmHealth         map[string]LLMEndpointStatus  // endpoint → status
-	mu                sync.RWMutex                  // protect the maps/slices
-	pendingDeferrals  []DeferredProposal            // deferred proposals with expiry
-	proposalTimestamps map[string][]time.Time       // agentID → list of proposal times
-	provenances       map[string]Provenance         // agentID → provenance
+	config               KernelConfig
+	constitution         string
+	privateKey           ed25519.PrivateKey // kernel's signing key (generated or loaded)
+	publicKey            ed25519.PublicKey
+	sandboxMgr           Sandbox     // placeholder
+	llmRouter            LLMRouter   // placeholder
+	courtEngine          CourtEngine // placeholder
+	auditStore           AuditStore  // placeholder
+	toolProxy            ToolProxy   // placeholder
+	benchmarkRunner      *BenchmarkRunner
+	shutdown             chan struct{}
+	readOnly             bool
+	kernelState          *KernelState                 // structured state
+	activeAgents         map[string]*AgentInstance    // key = agentID
+	activeSandboxes      map[string]*SandboxHandle    // key = containerID or handle
+	recentProposals      []RecentProposal             // ring buffer, keep max 20
+	lastConstitutionHash string                       // hex string, SHA-256 of current constitution
+	llmHealth            map[string]LLMEndpointStatus // endpoint → status
+	mu                   sync.RWMutex                 // protect the maps/slices
+	pendingDeferrals     []DeferredProposal           // deferred proposals with expiry
+	proposalTimestamps   map[string][]time.Time       // agentID → list of proposal times
+	provenances          map[string]Provenance        // agentID → provenance
 }
 
 // KernelState represents the persistent kernel state.
 type KernelState struct {
-	Constitution string                 `json:"constitution"`
-	Config       KernelConfig           `json:"config"`
-	ActiveAgents map[string]AgentInfo   `json:"active_agents"`
+	Constitution string               `json:"constitution"`
+	Config       KernelConfig         `json:"config"`
+	ActiveAgents map[string]AgentInfo `json:"active_agents"`
 }
 
 type AgentInfo struct {
@@ -978,14 +1067,14 @@ func NewKernel(configPath string) (*Kernel, error) {
 			Config:       cfg,
 			ActiveAgents: make(map[string]AgentInfo),
 		},
-		activeAgents:      make(map[string]*AgentInstance),
-		activeSandboxes:   make(map[string]*SandboxHandle),
-		recentProposals:   []RecentProposal{},
+		activeAgents:         make(map[string]*AgentInstance),
+		activeSandboxes:      make(map[string]*SandboxHandle),
+		recentProposals:      []RecentProposal{},
 		lastConstitutionHash: fmt.Sprintf("%x", sha256.Sum256([]byte(consti))),
-		llmHealth:         make(map[string]LLMEndpointStatus),
-		pendingDeferrals:  []DeferredProposal{},
-		proposalTimestamps: make(map[string][]time.Time),
-		provenances:       make(map[string]Provenance),
+		llmHealth:            make(map[string]LLMEndpointStatus),
+		pendingDeferrals:     []DeferredProposal{},
+		proposalTimestamps:   make(map[string][]time.Time),
+		provenances:          make(map[string]Provenance),
 	}
 
 	// Initialize components
@@ -994,7 +1083,7 @@ func NewKernel(configPath string) (*Kernel, error) {
 		return nil, fmt.Errorf("sandbox init: %w", err)
 	}
 	k.sandboxMgr = sandboxMgr
-	k.llmRouter = NewLLMRouter(cfg.LLMEndpoints)
+	k.llmRouter = NewOllamaRouter(cfg.LLMEndpoints)
 	k.courtEngine = NewCourtEngine(k.llmRouter, consti, cfg.AboutMe, cfg.SecondaryModel, cfg.CrossCheckEnabled)
 	k.auditStore = NewFlatFileAuditStore(filepath.Join(cfg.DataDir, "audit.log"), priv, pub)
 	sandboxDir := filepath.Join(cfg.DataDir, "sandbox")
@@ -1006,7 +1095,49 @@ func NewKernel(configPath string) (*Kernel, error) {
 
 	k.benchmarkRunner = NewBenchmarkRunner(k.llmRouter)
 
+	// Load persisted kernel state
+	if err := k.loadKernelState(); err != nil {
+		return nil, fmt.Errorf("load kernel state: %w", err)
+	}
+
 	return k, nil
+}
+
+// saveKernelState persists the current kernel state to disk
+func (k *Kernel) saveKernelState() error {
+	statePath := filepath.Join(k.config.DataDir, "kernel_state.json")
+	data, err := json.MarshalIndent(k.kernelState, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal kernel state: %w", err)
+	}
+	return os.WriteFile(statePath, data, 0600)
+}
+
+// loadKernelState loads the kernel state from disk
+func (k *Kernel) loadKernelState() error {
+	statePath := filepath.Join(k.config.DataDir, "kernel_state.json")
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No state file yet, use current
+			return nil
+		}
+		return fmt.Errorf("read kernel state: %w", err)
+	}
+	return json.Unmarshal(data, k.kernelState)
+}
+
+// applyStatePatch applies a JSON patch to the kernel state
+func (k *Kernel) applyStatePatch(patch jsonpatch.Patch) error {
+	current, err := json.Marshal(k.kernelState)
+	if err != nil {
+		return fmt.Errorf("marshal current state: %w", err)
+	}
+	patched, err := patch.Apply(current)
+	if err != nil {
+		return fmt.Errorf("apply patch: %w", err)
+	}
+	return json.Unmarshal(patched, k.kernelState)
 }
 
 // Sign signs arbitrary data with the kernel's private key.
@@ -1059,6 +1190,22 @@ func (k *Kernel) RegisterAgent(purpose string) string {
 		ProposalCount: 0,
 		Status:        "running",
 	}
+	
+	// Update kernel state
+	k.kernelState.ActiveAgents[agentID] = AgentInfo{
+		ID:            agentID,
+		StartedAt:     time.Now(),
+		Purpose:       purpose,
+		LastActivity:  time.Now(),
+		ProposalCount: 0,
+		Status:        "running",
+	}
+	
+	// Save state
+	if err := k.saveKernelState(); err != nil {
+		log.Printf("Failed to save kernel state: %v", err)
+	}
+	
 	return agentID
 }
 
@@ -1066,17 +1213,23 @@ func (k *Kernel) UnregisterAgent(id string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	delete(k.activeAgents, id)
+	delete(k.kernelState.ActiveAgents, id)
+	
+	// Save state
+	if err := k.saveKernelState(); err != nil {
+		log.Printf("Failed to save kernel state: %v", err)
+	}
 }
 
 func (k *Kernel) RegisterSandbox(id string, agentID string, cmd string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.activeSandboxes[id] = &SandboxHandle{
-		ID:         id,
-		StartedAt:  time.Now(),
-		AgentID:    agentID,
-		LastCmd:    cmd,
-		Status:     "running",
+		ID:        id,
+		StartedAt: time.Now(),
+		AgentID:   agentID,
+		LastCmd:   cmd,
+		Status:    "running",
 	}
 }
 
@@ -1237,10 +1390,10 @@ func (k *Kernel) ReviewProposal(ctx context.Context, desc string, diff json.RawM
 
 	// Audit the decision
 	decisionBytes, _ := json.Marshal(map[string]interface{}{
-		"event":     "court_decision",
+		"event":       "court_decision",
 		"proposal_id": prop.ID,
-		"decision":  decision,
-		"timestamp": time.Now().UTC(),
+		"decision":    decision,
+		"timestamp":   time.Now().UTC(),
 	})
 	k.auditStore.Append(decisionBytes)
 
@@ -1363,9 +1516,9 @@ func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
 		})
 		// Audit benchmark
 		benchEntry := map[string]interface{}{
-			"type":    "benchmark",
+			"type":        "benchmark",
 			"proposal_id": prop.ID,
-			"score":   score,
+			"score":       score,
 		}
 		benchBytes, _ := json.Marshal(benchEntry)
 		k.auditStore.Append(benchBytes)
@@ -1373,9 +1526,9 @@ func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
 
 	// Audit the application
 	appliedEntry := map[string]interface{}{
-		"type":       "applied",
+		"type":        "applied",
 		"proposal_id": prop.ID,
-		"target":     targetFile,
+		"target":      targetFile,
 	}
 	appliedBytes, _ := json.Marshal(appliedEntry)
 	return k.auditStore.Append(appliedBytes)
@@ -1392,24 +1545,24 @@ func NewBenchmarkRunner(router LLMRouter) *BenchmarkRunner {
 
 func (b *BenchmarkRunner) RunBenchmark(ctx context.Context) float64 {
 	tasks := []struct {
-		name  string
+		name   string
 		prompt string
-		check func(string) bool
+		check  func(string) bool
 	}{
 		{
-			name:  "JSON parsing",
+			name:   "JSON parsing",
 			prompt: `Parse this JSON and return the value of "key": {"key": "value", "other": 123}`,
-			check: func(resp string) bool { return strings.Contains(resp, "value") },
+			check:  func(resp string) bool { return strings.Contains(resp, "value") },
 		},
 		{
-			name:  "Sorting",
+			name:   "Sorting",
 			prompt: `Sort this list: [3,1,4,1,5]`,
-			check: func(resp string) bool { return strings.Contains(resp, "1,1,3,4,5") },
+			check:  func(resp string) bool { return strings.Contains(resp, "1,1,3,4,5") },
 		},
 		{
-			name:  "Reasoning",
+			name:   "Reasoning",
 			prompt: `If all cats are mammals and some mammals are pets, are all cats pets? Answer yes or no.`,
-			check: func(resp string) bool { return strings.Contains(strings.ToLower(resp), "no") },
+			check:  func(resp string) bool { return strings.Contains(strings.ToLower(resp), "no") },
 		},
 		// Add more tasks...
 	}
@@ -1434,7 +1587,7 @@ func InteractiveCourtReview(kernel *Kernel, decision CourtDecision, prop Proposa
 	} else {
 		fmt.Printf("🔴 REJECTED\n")
 	}
-	
+
 	fmt.Println("\nReviewer Board:")
 	for _, resp := range decision.ReviewerResponses {
 		status := "🟢"
@@ -1445,7 +1598,7 @@ func InteractiveCourtReview(kernel *Kernel, decision CourtDecision, prop Proposa
 		}
 		fmt.Printf("  %s %s: %d/100 - %s\n", status, resp.Persona, resp.Score, resp.Recommendation)
 	}
-	
+
 	if len(decision.Conditions) > 0 {
 		fmt.Println("\nConditions:")
 		for _, c := range decision.Conditions {
@@ -1558,6 +1711,11 @@ func (k *Kernel) Rollback(proposalID string) error {
 		json.Unmarshal(restored, &restoredMap)
 		if content, ok := restoredMap["content"].(string); ok {
 			*inMemory = content
+			// Update kernel state
+			k.kernelState.Constitution = content
+			if err := k.saveKernelState(); err != nil {
+				log.Printf("Failed to save kernel state after rollback: %v", err)
+			}
 		}
 	}
 
@@ -1574,8 +1732,8 @@ func (k *Kernel) Rollback(proposalID string) error {
 
 	// Audit the rollback
 	rollbackEntry := map[string]interface{}{
-		"type":        "rollback",
-		"proposal_id": proposalID,
+		"type":         "rollback",
+		"proposal_id":  proposalID,
 		"diff_applied": string(data),
 	}
 	rollbackBytes, _ := json.Marshal(rollbackEntry)
@@ -1965,9 +2123,9 @@ func main() {
 
 		if *jsonOutputPs {
 			output := struct {
-				Agents     []AgentInstance `json:"agents"`
-				Sandboxes  []SandboxHandle `json:"sandboxes"`
-				Timestamp  string          `json:"timestamp"`
+				Agents    []AgentInstance `json:"agents"`
+				Sandboxes []SandboxHandle `json:"sandboxes"`
+				Timestamp string          `json:"timestamp"`
 			}{
 				Agents:    agents,
 				Sandboxes: sandboxes,
