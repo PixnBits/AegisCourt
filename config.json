@@ -1,0 +1,13 @@
+{
+    "data_dir": "./aegis-data",
+    "constitution_path": "./docs/constitution.md",
+    "llm_endpoints": [
+        "http://localhost:11434"
+    ],
+    "about_me": {
+        "risk_tolerance": "financial",
+        "use_case": "personal-experiment",
+        "max_defer_hours": 24
+    },
+    "debug": true
+}
