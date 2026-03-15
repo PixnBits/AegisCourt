@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -69,6 +71,38 @@ type AboutMe struct {
 type Constitution struct {
 	Version string            `json:"version"`
 	Rules   map[string]string `json:"rules"` // rule number -> text
+}
+
+type AgentInstance struct {
+	ID            string
+	StartedAt     time.Time
+	Purpose       string
+	LastActivity  time.Time
+	ProposalCount uint64
+	Status        string // "running", "sleeping", "failed", "halted"
+}
+
+type SandboxHandle struct {
+	ID         string
+	StartedAt  time.Time
+	AgentID    string
+	LastCmd    string
+	Status     string // "running", "exited", "killed"
+}
+
+type RecentProposal struct {
+	ID          string
+	Timestamp   time.Time
+	Description string
+	Status      string // "pending", "approved", "rejected", "applied"
+	Score       float64
+}
+
+type LLMEndpointStatus struct {
+	LastCheck    time.Time
+	LastLatency  time.Duration
+	LastError    string
+	Status       string // "ok", "stale", "error"
 }
 
 // Sandbox interface (to be implemented with gVisor, seccomp fallback, etc.)
@@ -718,6 +752,12 @@ type Kernel struct {
 	shutdown     chan struct{}
 	readOnly     bool
 	currentState map[string]interface{} // dummy state
+	activeAgents      map[string]*AgentInstance     // key = agentID
+	activeSandboxes   map[string]*SandboxHandle     // key = containerID or handle
+	recentProposals   []RecentProposal              // ring buffer, keep max 20
+	lastConstitutionHash string                     // hex string, SHA-256 of current constitution
+	llmHealth         map[string]LLMEndpointStatus  // endpoint → status
+	mu                sync.RWMutex                  // protect the maps/slices
 }
 
 func NewKernel(configPath string) (*Kernel, error) {
@@ -776,6 +816,11 @@ func NewKernel(configPath string) (*Kernel, error) {
 		publicKey:    pub,
 		shutdown:     make(chan struct{}),
 		currentState: make(map[string]interface{}),
+		activeAgents:      make(map[string]*AgentInstance),
+		activeSandboxes:   make(map[string]*SandboxHandle),
+		recentProposals:   []RecentProposal{},
+		lastConstitutionHash: fmt.Sprintf("%x", sha256.Sum256([]byte(consti))),
+		llmHealth:         make(map[string]LLMEndpointStatus),
 	}
 
 	// Initialize components
@@ -796,6 +841,68 @@ func (k *Kernel) Sign(data []byte) ([]byte, error) {
 // VerifySignature verifies data against the kernel's public key.
 func (k *Kernel) VerifySignature(data, sig []byte) bool {
 	return ed25519.Verify(k.publicKey, data, sig)
+}
+
+func (k *Kernel) RegisterAgent(id string, purpose string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.activeAgents[id] = &AgentInstance{
+		ID:            id,
+		StartedAt:     time.Now(),
+		Purpose:       purpose,
+		LastActivity:  time.Now(),
+		ProposalCount: 0,
+		Status:        "running",
+	}
+}
+
+func (k *Kernel) UnregisterAgent(id string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	delete(k.activeAgents, id)
+}
+
+func (k *Kernel) RegisterSandbox(id string, agentID string, cmd string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.activeSandboxes[id] = &SandboxHandle{
+		ID:         id,
+		StartedAt:  time.Now(),
+		AgentID:    agentID,
+		LastCmd:    cmd,
+		Status:     "running",
+	}
+}
+
+func (k *Kernel) UnregisterSandbox(id string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	delete(k.activeSandboxes, id)
+}
+
+func (k *Kernel) RecordProposal(p RecentProposal) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.recentProposals = append(k.recentProposals, p)
+	if len(k.recentProposals) > 20 {
+		k.recentProposals = k.recentProposals[1:] // drop oldest
+	}
+}
+
+func (k *Kernel) UpdateLLMHealth(endpoint string, latency time.Duration, err error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	status := k.llmHealth[endpoint]
+	status.LastCheck = time.Now()
+	status.LastLatency = latency
+	if err != nil {
+		status.LastError = err.Error()
+		status.Status = "error"
+	} else {
+		status.LastError = ""
+		status.Status = "ok"
+	}
+	k.llmHealth[endpoint] = status
 }
 
 // ReviewProposal performs court review without applying.
@@ -926,6 +1033,7 @@ func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
 		json.Unmarshal(modified, &newData)
 		if content, ok := newData["content"].(string); ok {
 			*inMemory = content
+			k.lastConstitutionHash = fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 		}
 	}
 
@@ -1080,6 +1188,30 @@ func (k *Kernel) Rollback(proposalID string) error {
 // Run starts the kernel main loop (proposal listener, health checks, etc.)
 func (k *Kernel) Run(ctx context.Context) error {
 	log.Printf("AegisCourt kernel starting – paranoid mode always on")
+
+	// Start LLM health check goroutine
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				for _, endpoint := range k.config.LLMEndpoints {
+					go func(ep string) {
+						pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+						defer cancel()
+						start := time.Now()
+						_, err := k.llmRouter.Dispatch(pingCtx, "ping", "test")
+						latency := time.Since(start)
+						k.UpdateLLMHealth(ep, latency, err)
+					}(endpoint)
+				}
+			}
+		}
+	}()
+
 	defer func() {
 		// Graceful cleanup
 		k.sandboxMgr.Stop()
@@ -1117,7 +1249,7 @@ func (k *Kernel) EmergencyHalt() {
 // -----------------------------------------------------------------------------
 func main() {
 	configPath := flag.String("config", "config.json", "path to config file")
-	command := flag.String("cmd", "run", "command: run, propose, submit-proposal, emergency-halt, halt, export-audit, constitution-diff")
+	command := flag.String("cmd", "run", "command: run, propose, submit-proposal, emergency-halt, halt, export-audit, status, ps, constitution-diff")
 	proposalID := flag.String("proposal-id", "", "proposal ID for constitution-diff")
 	desc := flag.String("desc", "", "description for submit-proposal")
 	diffPath := flag.String("diff", "", "path to diff file for submit-proposal")
@@ -1128,6 +1260,7 @@ func main() {
 	interactiveCourt := flag.Bool("interactive-court", false, "enable interactive court Q&A")
 	withAgentLoop := flag.Bool("with-agent-loop", false, "spawn simple agent loop")
 	jsonOutputCourt := flag.Bool("json-output-court", false, "output court decision as JSON")
+	jsonOutputPs := flag.Bool("json-output-ps", false, "output ps as JSON")
 	flag.Parse()
 
 	// Cross-platform warnings
@@ -1301,6 +1434,141 @@ func main() {
 			log.Fatalf("rollback failed: %v", err)
 		}
 		log.Println("Rollback completed")
+	case "status":
+		// Visibility command – no sensitive data exposed
+		if kernel.readOnly {
+			log.Fatalf("Cannot view runtime status in emergency halt / read-only mode")
+		}
+		kernel.mu.RLock()
+		agentCount := len(kernel.activeAgents)
+		sandboxCount := len(kernel.activeSandboxes)
+		recentProps := make([]RecentProposal, len(kernel.recentProposals))
+		copy(recentProps, kernel.recentProposals)
+		kernel.mu.RUnlock()
+
+		fmt.Printf("Current time: %s\n", time.Now().Format("2006-01-02 15:04:05 MST"))
+		fmt.Printf("Kernel fingerprint: %s\n", fingerprint)
+
+		// Constitution version (first line if possible)
+		lines := strings.Split(kernel.constitution, "\n")
+		version := "unknown"
+		if len(lines) > 0 && strings.TrimSpace(lines[0]) != "" {
+			version = strings.TrimSpace(lines[0])
+			if len(version) > 50 {
+				version = version[:47] + "..."
+			}
+		}
+		hashPrefix := kernel.lastConstitutionHash
+		if len(hashPrefix) > 16 {
+			hashPrefix = hashPrefix[:16]
+		}
+		fmt.Printf("Constitution: %s (%s...)\n", version, hashPrefix)
+
+		// Last applied proposal
+		versionsDir := filepath.Join(kernel.config.DataDir, "versions")
+		lastAppliedPath := filepath.Join(versionsDir, "last-applied.txt")
+		lastID := "none"
+		if data, err := os.ReadFile(lastAppliedPath); err == nil {
+			lastID = strings.TrimSpace(string(data))
+		}
+		fmt.Printf("Last applied proposal: %s\n", lastID)
+
+		// Risk profile
+		fmt.Printf("Risk profile: %s / %s\n", kernel.config.AboutMe.RiskTolerance, kernel.config.AboutMe.UseCase)
+
+		// Active counts
+		fmt.Printf("Active agents: %d\n", agentCount)
+		fmt.Printf("Active sandboxes: %d\n", sandboxCount)
+
+		// Recent proposals (last 5)
+		if len(recentProps) > 0 {
+			fmt.Println("Recent proposals:")
+			start := len(recentProps) - 5
+			if start < 0 {
+				start = 0
+			}
+			for i := start; i < len(recentProps); i++ {
+				p := recentProps[i]
+				emoji := "🟡"
+				switch p.Status {
+				case "approved", "applied":
+					emoji = "🟢"
+				case "rejected":
+					emoji = "🔴"
+				}
+				desc := p.Description
+				if len(desc) > 60 {
+					desc = desc[:57] + "..."
+				}
+				fmt.Printf("  %s %s %s %.1f %s\n", emoji, p.Timestamp.Format("01-02 15:04"), p.Status, p.Score, desc)
+			}
+		}
+	case "ps":
+		// Visibility command – no sensitive data exposed
+		if kernel.readOnly {
+			log.Fatalf("Cannot view runtime status in emergency halt / read-only mode")
+		}
+		kernel.mu.RLock()
+		agents := make([]AgentInstance, 0, len(kernel.activeAgents))
+		for _, a := range kernel.activeAgents {
+			agents = append(agents, *a)
+		}
+		sandboxes := make([]SandboxHandle, 0, len(kernel.activeSandboxes))
+		for _, s := range kernel.activeSandboxes {
+			sandboxes = append(sandboxes, *s)
+		}
+		kernel.mu.RUnlock()
+
+		if *jsonOutputPs {
+			output := struct {
+				Agents     []AgentInstance `json:"agents"`
+				Sandboxes  []SandboxHandle `json:"sandboxes"`
+				Timestamp  string          `json:"timestamp"`
+			}{
+				Agents:    agents,
+				Sandboxes: sandboxes,
+				Timestamp: time.Now().Format(time.RFC3339),
+			}
+			json.NewEncoder(os.Stdout).Encode(output)
+		} else {
+			if len(agents) == 0 && len(sandboxes) == 0 {
+				fmt.Println("No agents or sandboxes currently active.")
+				return
+			}
+			if len(agents) > 0 {
+				fmt.Println("Agents:")
+				fmt.Printf("%-10s %-19s %-10s %-10s %-s\n", "ID", "Started", "Proposals", "Status", "Purpose")
+				fmt.Println(strings.Repeat("-", 80))
+				for _, a := range agents {
+					shortID := a.ID
+					if len(shortID) > 8 {
+						shortID = shortID[:8]
+					}
+					started := a.StartedAt.Format("2006-01-02 15:04:05")
+					fmt.Printf("%-10s %-19s %-10d %-10s %-s\n", shortID, started, a.ProposalCount, a.Status, a.Purpose)
+				}
+			}
+			if len(sandboxes) > 0 {
+				if len(agents) > 0 {
+					fmt.Println()
+				}
+				fmt.Println("Sandboxes:")
+				fmt.Printf("%-10s %-19s %-10s %-s\n", "ID", "Started", "Status", "Last Cmd (Agent)")
+				fmt.Println(strings.Repeat("-", 80))
+				for _, s := range sandboxes {
+					shortID := s.ID
+					if len(shortID) > 8 {
+						shortID = shortID[:8]
+					}
+					started := s.StartedAt.Format("2006-01-02 15:04:05")
+					shortAgent := s.AgentID
+					if len(shortAgent) > 8 {
+						shortAgent = shortAgent[:8]
+					}
+					fmt.Printf("%-10s %-19s %-10s %s (%s)\n", shortID, started, s.Status, s.LastCmd, shortAgent)
+				}
+			}
+		}
 	case "constitution-diff":
 		if *proposalID == "" {
 			log.Fatalf("constitution-diff requires -proposal-id")
