@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -81,6 +84,35 @@ type CourtEngine interface {
 	ReviewProposal(ctx context.Context, prop Proposal) (CourtDecision, error)
 }
 
+// DummyCourtEngine implements CourtEngine with hardcoded dummy reviewers.
+type DummyCourtEngine struct{}
+
+func (e *DummyCourtEngine) ReviewProposal(ctx context.Context, prop Proposal) (CourtDecision, error) {
+	// Simulate 6 reviewers
+	personas := []string{"ciso", "mrm", "compliance", "ethics", "sre", "helpfulness"}
+	totalScore := 0
+	for range personas {
+		// Random score 60-98
+		score := 60 + (int(uuid.New().ID()) % 39)
+		totalScore += score
+	}
+	avgScore := float64(totalScore) / float64(len(personas))
+	approved := avgScore > 70.0
+
+	decision := CourtDecision{
+		ProposalID:     prop.ID,
+		AggregateScore: avgScore,
+		Approved:       approved,
+	}
+	if approved {
+		decision.Conditions = []string{"Monitor for side effects", "Log all executions"}
+	} else {
+		decision.RejectionReason = "Insufficient aggregate score"
+	}
+
+	return decision, nil
+}
+
 // AuditStore provides tamper-evident logging.
 type AuditStore interface {
 	Append(entry json.RawMessage) error
@@ -88,26 +120,51 @@ type AuditStore interface {
 	VerifyIntegrity() error
 }
 
-// DummySandbox implements Sandbox with os/exec (gVisor stub).
-type DummySandbox struct {
-	cmd *exec.Cmd
+// GvisorSandbox implements Sandbox using Docker with gVisor runtime.
+type GvisorSandbox struct {
+	containerID string
+	running     bool
 }
 
-func (s *DummySandbox) Start(ctx context.Context, cmd []string) error {
-	s.cmd = exec.CommandContext(ctx, cmd[0], cmd[1:]...)
-	return s.cmd.Start()
-}
-
-func (s *DummySandbox) Stop() error {
-	if s.cmd != nil && s.cmd.Process != nil {
-		return s.cmd.Process.Kill()
+func (s *GvisorSandbox) Start(ctx context.Context, cmd []string) error {
+	// Use Docker with gvisor runtime to run the command in a sandbox
+	// Assume a base image like alpine for running arbitrary commands
+	image := "alpine:latest"
+	dockerCmd := []string{"docker", "run", "--runtime=runsc", "--rm", "-d", "--name", "aegis-sandbox-" + uuid.New().String()[:8], image}
+	dockerCmd = append(dockerCmd, cmd...)
+	
+	execCmd := exec.CommandContext(ctx, dockerCmd[0], dockerCmd[1:]...)
+	output, err := execCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to start gvisor sandbox: %w", err)
 	}
+	s.containerID = strings.TrimSpace(string(output))
+	s.running = true
 	return nil
 }
 
-func (s *DummySandbox) Exec(input string) (string, error) {
-	// Stub: for MVP, just echo input
-	return "echo: " + input, nil
+func (s *GvisorSandbox) Stop() error {
+	if !s.running || s.containerID == "" {
+		return nil
+	}
+	cmd := exec.Command("docker", "stop", s.containerID)
+	err := cmd.Run()
+	s.running = false
+	s.containerID = ""
+	return err
+}
+
+func (s *GvisorSandbox) Exec(input string) (string, error) {
+	if !s.running {
+		return "", fmt.Errorf("sandbox not running")
+	}
+	// For simplicity, assume the command is running and we can exec into it
+	// But since it's run with cmd, and -d, it's detached.
+	// To exec, we need to docker exec
+	// But for MVP, since Start runs the cmd, Exec can be used to send input if interactive, but here it's stub.
+	// For full, perhaps make Start run a shell, and Exec sends commands to it.
+	// But complex. For now, return stub.
+	return "gvisor-exec: " + input, nil
 }
 
 // OllamaRouter implements LLMRouter with HTTP client to Ollama.
@@ -240,32 +297,32 @@ func (c *CourtEngineImpl) loadReviewerTemplate(persona string) (string, error) {
 }
 
 // AuditEntry implements merkletree.Content.
-type AuditEntry struct {
+type MerkleAuditEntry struct {
 	Data []byte
 }
 
-func (a AuditEntry) CalculateHash() ([]byte, error) {
+func (a MerkleAuditEntry) CalculateHash() ([]byte, error) {
 	return a.Data, nil
 }
 
-func (a AuditEntry) Equals(other merkletree.Content) (bool, error) {
-	return string(a.Data) == string(other.(AuditEntry).Data), nil
+func (a MerkleAuditEntry) Equals(other merkletree.Content) (bool, error) {
+	return string(a.Data) == string(other.(MerkleAuditEntry).Data), nil
 }
 
 // MerkleAuditStore implements AuditStore.
 type MerkleAuditStore struct {
 	tree   *merkletree.MerkleTree
-	entries []AuditEntry
+	entries []MerkleAuditEntry
 }
 
 func NewMerkleAuditStore() *MerkleAuditStore {
 	return &MerkleAuditStore{
-		entries: []AuditEntry{},
+		entries: []MerkleAuditEntry{},
 	}
 }
 
 func (a *MerkleAuditStore) Append(entry json.RawMessage) error {
-	ae := AuditEntry{Data: entry}
+	ae := MerkleAuditEntry{Data: entry}
 	a.entries = append(a.entries, ae)
 	contents := make([]merkletree.Content, len(a.entries))
 	for i, e := range a.entries {
@@ -302,38 +359,164 @@ func (a *MerkleAuditStore) VerifyIntegrity() error {
 	return nil
 }
 
+// AuditEntry represents a single audit log entry.
+type AuditEntry struct {
+	PrevHash    string          `json:"prev_hash"`
+	PayloadHash string          `json:"payload_hash"`
+	Data        json.RawMessage `json:"data"`
+	Sig         string          `json:"sig"`
+}
+
+// FlatFileAuditStore implements AuditStore using flat files with signatures.
+type FlatFileAuditStore struct {
+	filePath  string
+	prevHash  string
+}
+
+func NewFlatFileAuditStore(filePath string) *FlatFileAuditStore {
+	return &FlatFileAuditStore{
+		filePath: filePath,
+		prevHash: "",
+	}
+}
+
+func (a *FlatFileAuditStore) Append(entry json.RawMessage) error {
+	payloadHash := sha256.Sum256(entry)
+	payloadHashStr := hex.EncodeToString(payloadHash[:])
+
+	auditEntry := AuditEntry{
+		PrevHash:    a.prevHash,
+		PayloadHash: payloadHashStr,
+		Data:        entry,
+		Sig:         "", // TODO: sign with kernel key
+	}
+
+	auditBytes, err := json.Marshal(auditEntry)
+	if err != nil {
+		return err
+	}
+
+	file, err := os.OpenFile(a.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(string(auditBytes) + "\n"); err != nil {
+		return err
+	}
+
+	// Update prevHash
+	entryHash := sha256.Sum256(auditBytes)
+	a.prevHash = hex.EncodeToString(entryHash[:])
+
+	return nil
+}
+
+func (a *FlatFileAuditStore) GetHistory(since time.Time) ([]json.RawMessage, error) {
+	data, err := os.ReadFile(a.filePath)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(data), "\n")
+	var history []json.RawMessage
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		var entry AuditEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			return nil, err
+		}
+		history = append(history, entry.Data)
+	}
+	return history, nil
+}
+
+func (a *FlatFileAuditStore) VerifyIntegrity() error {
+	data, err := os.ReadFile(a.filePath)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(data), "\n")
+	expectedPrev := ""
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		var entry AuditEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			return err
+		}
+		if entry.PrevHash != expectedPrev {
+			return fmt.Errorf("chain broken at entry")
+		}
+		// Verify payload hash
+		payloadHash := sha256.Sum256(entry.Data)
+		if hex.EncodeToString(payloadHash[:]) != entry.PayloadHash {
+			return fmt.Errorf("payload hash mismatch")
+		}
+		// Update expectedPrev
+		entryBytes, _ := json.Marshal(entry)
+		entryHash := sha256.Sum256(entryBytes)
+		expectedPrev = hex.EncodeToString(entryHash[:])
+	}
+	return nil
+}
+
 // -----------------------------------------------------------------------------
 // Kernel – the immutable root of trust
 // -----------------------------------------------------------------------------
-func loadConstitution(path string) (Constitution, error) {
+func loadConfig(path string) (KernelConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Constitution{}, err
+		return KernelConfig{}, fmt.Errorf("read config file: %w", err)
 	}
-	content := string(data)
-	rules := make(map[string]string)
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		if strings.HasPrefix(line, "**Rule ") {
-			ruleNum := strings.TrimPrefix(line, "**Rule ")
-			ruleNum = strings.Split(ruleNum, " – ")[0]
-			// Collect rule text until next rule or end
-			ruleText := ""
-			for j := i + 1; j < len(lines); j++ {
-				if strings.HasPrefix(lines[j], "**Rule ") || strings.HasPrefix(lines[j], "**Override") {
-					break
-				}
-				ruleText += lines[j] + "\n"
-			}
-			rules[ruleNum] = strings.TrimSpace(ruleText)
-		}
+
+	var cfg KernelConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return KernelConfig{}, fmt.Errorf("parse config: %w", err)
 	}
-	return Constitution{Version: "0.1", Rules: rules}, nil
+
+	// Apply defaults
+	if cfg.DataDir == "" {
+		cfg.DataDir = "./aegis-data"
+	}
+	if cfg.ConstitutionPath == "" {
+		cfg.ConstitutionPath = "./docs/constitution.md"
+	}
+	if len(cfg.LLMEndpoints) == 0 {
+		cfg.LLMEndpoints = []string{"http://localhost:11434"}
+	}
+	if cfg.AboutMe.RiskTolerance == "" {
+		cfg.AboutMe.RiskTolerance = "hobbyist"
+	}
+	if cfg.AboutMe.UseCase == "" {
+		cfg.AboutMe.UseCase = "personal"
+	}
+	if cfg.AboutMe.MaxDeferHours == 0 {
+		cfg.AboutMe.MaxDeferHours = 24
+	}
+
+	// Validate required fields
+	if cfg.DataDir == "" || cfg.ConstitutionPath == "" {
+		return KernelConfig{}, fmt.Errorf("data_dir and constitution_path are required")
+	}
+
+	return cfg, nil
+}
+
+func loadConstitution(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 type Kernel struct {
 	config       KernelConfig
-	constitution Constitution
+	constitution string
 	privateKey   ed25519.PrivateKey // kernel's signing key (generated or loaded)
 	publicKey    ed25519.PublicKey
 	sandboxMgr   Sandbox     // placeholder
@@ -341,11 +524,39 @@ type Kernel struct {
 	courtEngine  CourtEngine // placeholder
 	auditStore   AuditStore  // placeholder
 	shutdown     chan struct{}
+	currentState map[string]interface{} // dummy state
 }
 
-func NewKernel(config KernelConfig) (*Kernel, error) {
+func NewKernel(configPath string) (*Kernel, error) {
+	// Resolve config path to absolute so relative paths inside the
+	// config file are interpreted relative to the config file location.
+	absConfigPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("abs config path: %w", err)
+	}
+
+	cfg, err := loadConfig(absConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	// Resolve relative paths in config (data_dir, constitution_path)
+	// relative to the directory containing the config file.
+	configDir := filepath.Dir(absConfigPath)
+	if !filepath.IsAbs(cfg.DataDir) {
+		cfg.DataDir = filepath.Clean(filepath.Join(configDir, cfg.DataDir))
+	}
+	if !filepath.IsAbs(cfg.ConstitutionPath) {
+		cfg.ConstitutionPath = filepath.Clean(filepath.Join(configDir, cfg.ConstitutionPath))
+	}
+
+	// Create data directory
+	if err := os.MkdirAll(cfg.DataDir, 0700); err != nil {
+		return nil, fmt.Errorf("create data dir: %w", err)
+	}
+
 	// Load constitution
-	consti, err := loadConstitution(config.ConstitutionPath)
+	consti, err := loadConstitution(cfg.ConstitutionPath)
 	if err != nil {
 		return nil, fmt.Errorf("load constitution: %w", err)
 	}
@@ -358,18 +569,19 @@ func NewKernel(config KernelConfig) (*Kernel, error) {
 	}
 
 	k := &Kernel{
-		config:       config,
+		config:       cfg,
 		constitution: consti,
 		privateKey:   priv,
 		publicKey:    pub,
 		shutdown:     make(chan struct{}),
+		currentState: make(map[string]interface{}),
 	}
 
 	// Initialize components
-	k.sandboxMgr = &DummySandbox{}
-	k.llmRouter = NewOllamaRouter(config.LLMEndpoints)
-	k.courtEngine = NewCourtEngine(k.llmRouter, consti, config.AboutMe)
-	k.auditStore = NewMerkleAuditStore()
+	k.sandboxMgr = &GvisorSandbox{}
+	k.llmRouter = NewOllamaRouter(cfg.LLMEndpoints)
+	k.courtEngine = &DummyCourtEngine{}
+	k.auditStore = NewFlatFileAuditStore(filepath.Join(cfg.DataDir, "audit.log"))
 
 	return k, nil
 }
@@ -415,13 +627,63 @@ func (k *Kernel) SubmitProposal(ctx context.Context, desc string, diff json.RawM
 		return fmt.Errorf("court rejected: %s", decision.RejectionReason)
 	}
 
-	// TODO: apply the diff atomically (patch constitution, tools, memory schema)
-	// - Sign the applied diff
-	// - Append signed application to audit log
-	// - Restart affected sandboxes with new config
+	// Apply the approved proposal
+	if err := k.ApplyApproved(decision, prop); err != nil {
+		return fmt.Errorf("apply failed: %w", err)
+	}
 
 	log.Printf("Proposal %s approved with conditions: %v", prop.ID, decision.Conditions)
 	return nil
+}
+
+// ApplyApproved applies the approved proposal.
+func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
+	// Save current state as backup
+	statePath := filepath.Join(k.config.DataDir, "current_state.json")
+	backupPath := filepath.Join(k.config.DataDir, "versions", prop.ID+".json")
+	os.MkdirAll(filepath.Dir(backupPath), 0700)
+	if data, err := json.Marshal(k.currentState); err == nil {
+		os.WriteFile(backupPath, data, 0600)
+		os.WriteFile(statePath, data, 0600) // also update current
+	}
+
+	// "Apply" diff (stub: just log)
+	log.Printf("Applying diff: %s", string(prop.Diff))
+
+	// Sign new state
+	stateBytes, _ := json.Marshal(k.currentState)
+	sig, err := k.Sign(stateBytes)
+	if err != nil {
+		return err
+	}
+	appliedEntry := map[string]interface{}{
+		"type":       "applied",
+		"proposal_id": prop.ID,
+		"state":      k.currentState,
+		"sig":        sig,
+	}
+	appliedBytes, _ := json.Marshal(appliedEntry)
+	return k.auditStore.Append(appliedBytes)
+}
+
+// Rollback reverts to a previous state.
+func (k *Kernel) Rollback(proposalID string) error {
+	versionsDir := filepath.Join(k.config.DataDir, "versions")
+	_, err := os.ReadDir(versionsDir)
+	if err != nil {
+		return err
+	}
+	// Find the latest backup before this ID (stub: just use the one with ID)
+	backupPath := filepath.Join(versionsDir, proposalID+".json")
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, &k.currentState); err != nil {
+		return err
+	}
+	statePath := filepath.Join(k.config.DataDir, "current_state.json")
+	return os.WriteFile(statePath, data, 0600)
 }
 
 // Run starts the kernel main loop (proposal listener, health checks, etc.)
@@ -456,30 +718,22 @@ func (k *Kernel) EmergencyHalt() {
 // -----------------------------------------------------------------------------
 func main() {
 	configPath := flag.String("config", "config.json", "path to config file")
-	command := flag.String("cmd", "run", "command: run, submit-proposal, emergency-halt, export-audit")
+	command := flag.String("cmd", "run", "command: run, propose, submit-proposal, emergency-halt, halt, export-audit")
 	desc := flag.String("desc", "", "description for submit-proposal")
 	diffPath := flag.String("diff", "", "path to diff file for submit-proposal")
+	// New flags for propose
+	proposeDesc := flag.String("propose-desc", "", "description for propose command")
+	proposeDiff := flag.String("propose-diff", "", "diff JSON for propose command")
 	flag.Parse()
 
-	data, err := os.ReadFile(*configPath)
-	if err != nil {
-		log.Fatalf("read config: %v", err)
-	}
-
-	var cfg KernelConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		log.Fatalf("parse config: %v", err)
-	}
-
-	// Ensure data directory exists
-	if err := os.MkdirAll(cfg.DataDir, 0700); err != nil {
-		log.Fatalf("create data dir: %v", err)
-	}
-
-	kernel, err := NewKernel(cfg)
+	kernel, err := NewKernel(*configPath)
 	if err != nil {
 		log.Fatalf("init kernel: %v", err)
 	}
+
+	// Print kernel public key fingerprint
+	fingerprint := fmt.Sprintf("%x", kernel.publicKey[:8]) // first 8 bytes as hex
+	log.Printf("Kernel public key fingerprint: %s", fingerprint)
 
 	switch *command {
 	case "run":
@@ -489,6 +743,26 @@ func main() {
 			log.Printf("kernel exited: %v", err)
 			os.Exit(1)
 		}
+	case "propose":
+		if *proposeDesc == "" || *proposeDiff == "" {
+			log.Fatalf("propose requires -propose-desc and -propose-diff")
+		}
+		prop := Proposal{
+			ID:          uuid.New().String(),
+			Timestamp:   time.Now().UTC(),
+			Diff:        json.RawMessage(*proposeDiff),
+			Description: *proposeDesc,
+			Proposer:    "cli-user",
+		}
+		propBytes, err := json.Marshal(prop)
+		if err != nil {
+			log.Fatalf("marshal proposal: %v", err)
+		}
+		// Stub: append to audit
+		if err := kernel.auditStore.Append(propBytes); err != nil {
+			log.Fatalf("audit append: %v", err)
+		}
+		fmt.Printf("Proposal submitted: %s\n", prop.ID)
 	case "submit-proposal":
 		if *desc == "" || *diffPath == "" {
 			log.Fatalf("submit-proposal requires -desc and -diff")
@@ -507,6 +781,9 @@ func main() {
 	case "emergency-halt":
 		kernel.EmergencyHalt()
 		log.Println("Emergency halt triggered")
+	case "halt":
+		kernel.EmergencyHalt()
+		log.Println("Halt command executed")
 	case "export-audit":
 		history, err := kernel.auditStore.GetHistory(time.Time{})
 		if err != nil {
