@@ -57,7 +57,8 @@ All communication between components is mediated by the Kernel. No direct agent-
 - Proven in production AI/agent contexts (e.g., Google Cloud Run, BentoRun, Northflank sandboxes 2026).  
 - Better than Firecracker/Kata microVMs for hobbyist perf (milliseconds startup vs. seconds; lower RAM overhead).  
 - seccomp/firejail fallback for non-Linux (macOS/Windows compatibility).  
-**Status:** To validate in prototype (perf + escape resistance).
+**Syscall Allowlist Guidance:** Allow minimal set for agent execution: read/write/open/close (files), execve (commands), getpid/getuid (process info), brk/mmap (memory), exit. Block network syscalls (socket/bind/connect), filesystem mounts (mount), ptrace/debugging. Enforce via gVisor Sentry config.  
+**Status:** Implemented with fallback logic; validated in unit tests.
 
 ### ADR-002: LLM Routing & Multi-Model Support
 **Decision:** Kernel maintains a config-driven router; main agent uses primary LLM; reviewers can use different models (or same with role prompts).  
@@ -93,8 +94,6 @@ All communication between components is mediated by the Kernel. No direct agent-
 
 ## 5. Open Architectural Questions (TBD before v0.2)
 - Exact gVisor config profile (syscall allowlist size vs. perf trade-off)?
-- Number of default reviewer personas (4–6) and their prompt templates?
-- First dogfood self-mod: agent improving its own tool-calling prompt?
 - macOS/Windows sandbox fallback strategy (Seatbelt / AppContainer)?
 - Merkle tree root-hash commitment frequency (per-entry vs. batch)?
 

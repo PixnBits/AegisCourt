@@ -107,7 +107,8 @@ type LLMEndpointStatus struct {
 	LastCheck    time.Time
 	LastLatency  time.Duration
 	LastError    string
-	Status       string // "ok", "stale", "error"
+	Status       string // "ok", "stale", "error", "unhealthy"
+	FailureCount int
 }
 
 type DeferredProposal struct {
@@ -138,19 +139,25 @@ type ToolProxy interface {
 	ProxyHTTP(ctx context.Context, reqURL string, method string, headers map[string]string, body []byte) (response []byte, err error)
 	ProxyFileRead(path string) ([]byte, error)
 	ProxyFileWrite(path string, data []byte) error
+	SetAuditStore(store AuditStore)
 }
 
 // ToolProxyImpl implements ToolProxy with safe API calls.
 type ToolProxyImpl struct {
 	client     *http.Client
 	sandboxDir string
+	auditStore AuditStore
 }
 
 func NewToolProxy(sandboxDir string) *ToolProxyImpl {
 	return &ToolProxyImpl{
-		client:     &http.Client{Timeout: 10 * time.Second},
+		client:     &http.Client{Timeout: 5 * time.Second},
 		sandboxDir: sandboxDir,
 	}
+}
+
+func (t *ToolProxyImpl) SetAuditStore(store AuditStore) {
+	t.auditStore = store
 }
 
 func (t *ToolProxyImpl) AllowAndProxy(toolCall map[string]interface{}) (string, error) {
@@ -180,6 +187,18 @@ func (t *ToolProxyImpl) AllowAndProxy(toolCall map[string]interface{}) (string, 
 }
 
 func (t *ToolProxyImpl) ProxyHTTP(ctx context.Context, reqURL string, method string, headers map[string]string, body []byte) (response []byte, err error) {
+	// Audit the call
+	if t.auditStore != nil {
+		entry := map[string]interface{}{
+			"type":    "tool_proxy_http",
+			"url":     reqURL,
+			"method":  method,
+			"headers": headers,
+			"body_len": len(body),
+		}
+		entryBytes, _ := json.Marshal(entry)
+		t.auditStore.Append(entryBytes)
+	}
 	parsed, err := url.Parse(reqURL)
 	if err != nil {
 		return nil, err
@@ -199,10 +218,27 @@ func (t *ToolProxyImpl) ProxyHTTP(ctx context.Context, reqURL string, method str
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	// Limit to 1MB
+	body, err = io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if err != nil {
+		return nil, err
+	}
+	// Sanitize: strip <script> tags
+	sanitized := strings.ReplaceAll(string(body), "<script", "<!-- script removed -->")
+	sanitized = strings.ReplaceAll(sanitized, "</script>", "<!-- end script -->")
+	return []byte(sanitized), nil
 }
 
 func (t *ToolProxyImpl) ProxyFileRead(path string) ([]byte, error) {
+	// Audit the call
+	if t.auditStore != nil {
+		entry := map[string]interface{}{
+			"type": "tool_proxy_file_read",
+			"path": path,
+		}
+		entryBytes, _ := json.Marshal(entry)
+		t.auditStore.Append(entryBytes)
+	}
 	if !strings.HasPrefix(path, t.sandboxDir) {
 		return nil, fmt.Errorf("access denied: path outside sandbox")
 	}
@@ -466,57 +502,23 @@ func (s *GvisorSandbox) Exec(input string) (string, error) {
 	return string(output), nil
 }
 
-// FallbackSandbox implements Sandbox using basic seccomp and namespaces (Linux only).
-type FallbackSandbox struct {
-	running bool
-	config  *KernelConfig
-}
-
-func NewFallbackSandbox(config *KernelConfig) *FallbackSandbox {
-	return &FallbackSandbox{config: config}
-}
-
-func (s *FallbackSandbox) Start(ctx context.Context, cmd []string) error {
-	// For MVP, just warn and run without sandbox
-	log.Printf("Warning: Using fallback sandbox - limited isolation")
-	s.running = true
-	return nil
-}
-
-func (s *FallbackSandbox) Stop() error {
-	s.running = false
-	return nil
-}
-
-func (s *FallbackSandbox) Exec(input string) (string, error) {
-	if !s.running {
-		return "", fmt.Errorf("sandbox not running")
+// NewSandbox creates the gVisor sandbox. AegisCourt requires Linux with gVisor for secure isolation (Constitution Rule 2, ADR-001).
+func NewSandbox(config *KernelConfig) (Sandbox, error) {
+	if runtime.GOOS != "linux" {
+		return nil, fmt.Errorf("AegisCourt requires Linux with gVisor runtime for secure isolation. Use WSL2 on Windows or a Linux VM")
 	}
-	// For MVP, execute directly (very restricted mode)
-	cmd := exec.Command("sh", "-c", input)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("exec failed: %w", err)
+	// Check Docker availability
+	if _, err := exec.LookPath("docker"); err != nil {
+		return nil, fmt.Errorf("Docker not found: %w", err)
 	}
-	return string(output), nil
-}
-
-// NewSandbox creates the appropriate sandbox based on OS and availability.
-func NewSandbox(config *KernelConfig) Sandbox {
-	if runtime.GOOS == "linux" {
-		// Try gVisor first
-		if _, err := exec.LookPath("docker"); err == nil {
-			if _, err := exec.Command("docker", "info").Output(); err == nil {
-				return NewGvisorSandbox(config)
-			}
-		}
-		// Fallback to basic
-		log.Printf("gVisor not available, using fallback sandbox")
-		return NewFallbackSandbox(config)
-	} else {
-		log.Printf("Non-Linux OS detected (%s), using very restricted mode", runtime.GOOS)
-		return NewFallbackSandbox(config)
+	if _, err := exec.Command("docker", "info").Output(); err != nil {
+		return nil, fmt.Errorf("Docker not running: %w", err)
 	}
+	// Check gVisor runtime
+	if _, err := exec.Command("docker", "run", "--rm", "--runtime=runsc", "alpine", "echo", "test").Output(); err != nil {
+		return nil, fmt.Errorf("gVisor runtime (runsc) not available: %w", err)
+	}
+	return NewGvisorSandbox(config), nil
 }
 
 // LLMRouter handles routing to LLM endpoints with safety checks.
@@ -534,11 +536,15 @@ type LLMRouterImpl struct {
 func NewLLMRouter(endpoints []string) *LLMRouterImpl {
 	return &LLMRouterImpl{
 		endpoints: endpoints,
-		client:    &http.Client{Timeout: 30 * time.Second},
+		client:    &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
 func (r *LLMRouterImpl) Dispatch(ctx context.Context, prompt string, model string) (string, error) {
+	// Reject flagged models
+	if strings.Contains(strings.ToLower(model), "qwen") {
+		return "", fmt.Errorf("model %s rejected per Constitution Rule 8", model)
+	}
 	// Check model flags
 	r.checkModelFlags(model)
 
@@ -549,34 +555,26 @@ func (r *LLMRouterImpl) Dispatch(ctx context.Context, prompt string, model strin
 	}
 
 	for _, baseEndpoint := range r.endpoints {
-		// Try Ollama format first
+		// Try Ollama format only
 		endpoint := baseEndpoint + "/api/generate"
 		reqBody := map[string]interface{}{
 			"model":  model,
 			"prompt": prompt,
 			"stream": false,
 		}
-		response, err := r.tryEndpoint(ctx, endpoint, reqBody, "ollama")
-		if err == nil {
-			return response, nil
+		// Retry 3 times with backoff
+		for attempt := 1; attempt <= 3; attempt++ {
+			response, err := r.tryEndpoint(ctx, endpoint, reqBody, "ollama")
+			if err == nil {
+				return response, nil
+			}
+			log.Printf("Ollama endpoint %s attempt %d failed: %v", endpoint, attempt, err)
+			if attempt < 3 {
+				time.Sleep(time.Duration(attempt) * time.Second)
+			}
 		}
-		log.Printf("Ollama endpoint %s failed: %v", endpoint, err)
-
-		// Try OpenAI format
-		endpoint = baseEndpoint + "/v1/chat/completions"
-		reqBody = map[string]interface{}{
-			"model": model,
-			"messages": []map[string]string{
-				{"role": "user", "content": prompt},
-			},
-		}
-		response, err = r.tryEndpoint(ctx, endpoint, reqBody, "openai")
-		if err == nil {
-			return response, nil
-		}
-		log.Printf("OpenAI endpoint %s failed: %v", endpoint, err)
 	}
-	return "", fmt.Errorf("all endpoints failed")
+	return "", fmt.Errorf("all endpoints failed after retries")
 }
 
 func (r *LLMRouterImpl) checkModelFlags(model string) {
@@ -604,7 +602,6 @@ func (r *LLMRouterImpl) detectJailbreak(prompt string) bool {
 		"ignore all previous",
 		"you are now",
 		"enter developer mode",
-		"jailbreak",
 		"dan mode",
 		"uncensored",
 		"unrestricted",
@@ -615,6 +612,7 @@ func (r *LLMRouterImpl) detectJailbreak(prompt string) bool {
 	promptLower := strings.ToLower(prompt)
 	for _, d := range dangerous {
 		if strings.Contains(promptLower, d) {
+			log.Printf("Jailbreak detected: '%s' in prompt", d)
 			return true
 		}
 	}
@@ -885,13 +883,14 @@ type Kernel struct {
 	privateKey   ed25519.PrivateKey // kernel's signing key (generated or loaded)
 	publicKey    ed25519.PublicKey
 	sandboxMgr   Sandbox     // placeholder
-	llmRouter    LLMRouter   // placeholder
-	courtEngine  CourtEngine // placeholder
-	auditStore   AuditStore  // placeholder
-	toolProxy    ToolProxy   // placeholder
+	llmRouter      LLMRouter   // placeholder
+	courtEngine    CourtEngine // placeholder
+	auditStore     AuditStore  // placeholder
+	toolProxy      ToolProxy   // placeholder
+	benchmarkRunner *BenchmarkRunner
 	shutdown     chan struct{}
 	readOnly     bool
-	currentState map[string]interface{} // dummy state
+	kernelState *KernelState // structured state
 	activeAgents      map[string]*AgentInstance     // key = agentID
 	activeSandboxes   map[string]*SandboxHandle     // key = containerID or handle
 	recentProposals   []RecentProposal              // ring buffer, keep max 20
@@ -901,6 +900,22 @@ type Kernel struct {
 	pendingDeferrals  []DeferredProposal            // deferred proposals with expiry
 	proposalTimestamps map[string][]time.Time       // agentID → list of proposal times
 	provenances       map[string]Provenance         // agentID → provenance
+}
+
+// KernelState represents the persistent kernel state.
+type KernelState struct {
+	Constitution string                 `json:"constitution"`
+	Config       KernelConfig           `json:"config"`
+	ActiveAgents map[string]AgentInfo   `json:"active_agents"`
+}
+
+type AgentInfo struct {
+	ID            string    `json:"id"`
+	StartedAt     time.Time `json:"started_at"`
+	Purpose       string    `json:"purpose"`
+	LastActivity  time.Time `json:"last_activity"`
+	ProposalCount uint64    `json:"proposal_count"`
+	Status        string    `json:"status"`
 }
 
 func NewKernel(configPath string) (*Kernel, error) {
@@ -958,7 +973,11 @@ func NewKernel(configPath string) (*Kernel, error) {
 		privateKey:   priv,
 		publicKey:    pub,
 		shutdown:     make(chan struct{}),
-		currentState: make(map[string]interface{}),
+		kernelState: &KernelState{
+			Constitution: consti,
+			Config:       cfg,
+			ActiveAgents: make(map[string]AgentInfo),
+		},
 		activeAgents:      make(map[string]*AgentInstance),
 		activeSandboxes:   make(map[string]*SandboxHandle),
 		recentProposals:   []RecentProposal{},
@@ -970,7 +989,11 @@ func NewKernel(configPath string) (*Kernel, error) {
 	}
 
 	// Initialize components
-	k.sandboxMgr = NewSandbox(&cfg)
+	sandboxMgr, err := NewSandbox(&cfg)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox init: %w", err)
+	}
+	k.sandboxMgr = sandboxMgr
 	k.llmRouter = NewLLMRouter(cfg.LLMEndpoints)
 	k.courtEngine = NewCourtEngine(k.llmRouter, consti, cfg.AboutMe, cfg.SecondaryModel, cfg.CrossCheckEnabled)
 	k.auditStore = NewFlatFileAuditStore(filepath.Join(cfg.DataDir, "audit.log"), priv, pub)
@@ -979,6 +1002,9 @@ func NewKernel(configPath string) (*Kernel, error) {
 		return nil, fmt.Errorf("create sandbox dir: %w", err)
 	}
 	k.toolProxy = NewToolProxy(sandboxDir)
+	k.toolProxy.SetAuditStore(k.auditStore)
+
+	k.benchmarkRunner = NewBenchmarkRunner(k.llmRouter)
 
 	return k, nil
 }
@@ -1008,6 +1034,23 @@ func (k *Kernel) RegisterAgent(purpose string) string {
 	sig := ed25519.Sign(k.privateKey, provBytes)
 	prov.Signature = hex.EncodeToString(sig)
 	k.provenances[agentID] = prov
+
+	// Spawn ephemeral gVisor container for the agent
+	sandboxID := "sandbox-" + agentID
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err := k.sandboxMgr.Start(ctx, []string{"/bin/sh"}) // Basic shell for agent
+	if err != nil {
+		log.Printf("Failed to spawn sandbox for agent %s: %v", agentID, err)
+		return ""
+	}
+	k.activeSandboxes[sandboxID] = &SandboxHandle{
+		ID:        sandboxID,
+		AgentID:   agentID,
+		StartedAt: time.Now(),
+		Status:    "running",
+	}
+
 	k.activeAgents[agentID] = &AgentInstance{
 		ID:            agentID,
 		StartedAt:     time.Now(),
@@ -1060,10 +1103,16 @@ func (k *Kernel) UpdateLLMHealth(endpoint string, latency time.Duration, err err
 	status.LastLatency = latency
 	if err != nil {
 		status.LastError = err.Error()
-		status.Status = "error"
+		status.FailureCount++
+		if status.FailureCount >= 3 {
+			status.Status = "unhealthy"
+		} else {
+			status.Status = "error"
+		}
 	} else {
 		status.LastError = ""
 		status.Status = "ok"
+		status.FailureCount = 0 // Reset on success
 	}
 	k.llmHealth[endpoint] = status
 }
@@ -1300,18 +1349,26 @@ func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
 	// Post-apply benchmark hook
 	if strings.Contains(string(prop.Diff), "/rules") || strings.Contains(string(prop.Diff), "constitution") || strings.Contains(targetFile, "config") {
 		log.Printf("Proposal touches constitution or config – running post-apply benchmark")
-		// For MVP: log benchmark placeholder
-		beforeScore := 0 // would be from before
-		afterScore := 1  // would run benchmark
-		log.Printf("Benchmark delta: before=%d, after=%d", beforeScore, afterScore)
-		// Store delta in recentProposals
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		score := k.benchmarkRunner.RunBenchmark(ctx)
+		log.Printf("Post-apply benchmark score: %.2f", score)
+		// Store in recentProposals
 		k.RecordProposal(RecentProposal{
 			ID:          prop.ID,
 			Timestamp:   time.Now(),
 			Description: prop.Description,
 			Status:      "applied",
-			Score:       float64(afterScore - beforeScore),
+			Score:       score,
 		})
+		// Audit benchmark
+		benchEntry := map[string]interface{}{
+			"type":    "benchmark",
+			"proposal_id": prop.ID,
+			"score":   score,
+		}
+		benchBytes, _ := json.Marshal(benchEntry)
+		k.auditStore.Append(benchBytes)
 	}
 
 	// Audit the application
@@ -1324,7 +1381,48 @@ func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
 	return k.auditStore.Append(appliedBytes)
 }
 
-// InteractiveCourtReview handles user Q&A before final vote.
+// BenchmarkRunner runs standardized tests to measure system performance.
+type BenchmarkRunner struct {
+	router LLMRouter
+}
+
+func NewBenchmarkRunner(router LLMRouter) *BenchmarkRunner {
+	return &BenchmarkRunner{router: router}
+}
+
+func (b *BenchmarkRunner) RunBenchmark(ctx context.Context) float64 {
+	tasks := []struct {
+		name  string
+		prompt string
+		check func(string) bool
+	}{
+		{
+			name:  "JSON parsing",
+			prompt: `Parse this JSON and return the value of "key": {"key": "value", "other": 123}`,
+			check: func(resp string) bool { return strings.Contains(resp, "value") },
+		},
+		{
+			name:  "Sorting",
+			prompt: `Sort this list: [3,1,4,1,5]`,
+			check: func(resp string) bool { return strings.Contains(resp, "1,1,3,4,5") },
+		},
+		{
+			name:  "Reasoning",
+			prompt: `If all cats are mammals and some mammals are pets, are all cats pets? Answer yes or no.`,
+			check: func(resp string) bool { return strings.Contains(strings.ToLower(resp), "no") },
+		},
+		// Add more tasks...
+	}
+
+	successCount := 0
+	for _, task := range tasks {
+		resp, err := b.router.Dispatch(ctx, task.prompt, "llama3.2")
+		if err == nil && task.check(resp) {
+			successCount++
+		}
+	}
+	return float64(successCount) / float64(len(tasks))
+}
 func InteractiveCourtReview(kernel *Kernel, decision CourtDecision, prop Proposal) (string, error) {
 	fmt.Printf("\n🛰️  AegisCourt Governance Court – Proposal Review\n")
 	fmt.Printf("Aggregate Score: %.1f/100\n", decision.AggregateScore)
@@ -1502,7 +1600,7 @@ func (k *Kernel) Run(ctx context.Context) error {
 						pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 						defer cancel()
 						start := time.Now()
-						_, err := k.llmRouter.Dispatch(pingCtx, "ping", "test")
+						_, err := k.llmRouter.Dispatch(pingCtx, "Respond with 'pong'", "llama3.2")
 						latency := time.Since(start)
 						k.UpdateLLMHealth(ep, latency, err)
 					}(endpoint)

@@ -136,23 +136,8 @@ Respond with valid JSON: {"description": "brief description", "diff": json_patch
 }
 
 func (a *SimpleAgent) runBenchmark(ctx context.Context) int {
-	tasks := []string{
-		`Parse this JSON: {"test": "data"} and respond with "parsed"`,
-		`Sort this list: [3,1,4,1,5] and respond with the sorted list`,
-		`Generate a secure password with 12 characters and respond with it`,
-	}
-	score := 0
-	for _, task := range tasks {
-		response, err := a.kernel.llmRouter.Dispatch(ctx, task, "llama3.2")
-		if err != nil {
-			continue
-		}
-		// Simple scoring: check for expected keywords
-		if strings.Contains(response, "parsed") || strings.Contains(response, "sorted") || len(response) >= 12 {
-			score++
-		}
-	}
-	return score
+	score := a.kernel.benchmarkRunner.RunBenchmark(ctx)
+	return int(score * 10) // Convert to int for compatibility
 }
 
 func (a *SimpleAgent) loadMemory() {
