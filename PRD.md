@@ -54,6 +54,79 @@ See [./docs/user-stories](./docs/user-stories).
 4. Kernel bootstrap + cryptographic self-signature.  
 5. First test proposal (e.g., “add echo skill”) → live Governance Court demo.
 
+#### 5.4 CLI Interface (Operator-Facing)
+The primary (and initially only) user interface is a secure, minimalist CLI. It follows Unix patterns (git/docker-like subcommands) with paranoid defaults, progressive disclosure, and full audit logging of every command that affects state.
+
+**Core Design Goals**
+- Setup in <5 minutes (interactive wizard).
+- Governance interactions feel interactive yet scriptable (<45 sec round-trip).
+- Every state-changing command is logged immutably.
+- Zero direct host manipulation outside mediated kernel channels.
+- Cross-platform (Linux/macOS/Windows via Docker fallback where needed).
+
+**High-Level Command Structure**
+Root: `aegiscourt` (alias `ac` encouraged)
+
+Global flags:
+- `--verbose` — detailed output including full reviewer JSON
+- `--json` — machine-readable output
+- `--dry-run` — simulate without applying changes
+- `--profile <path>` — override About Me config
+- `--confirm` — bypass interactive prompts (use with caution; always logged)
+
+**Main Subcommands** (grouped)
+
+**Setup & Configuration**
+- `init` — bootstrap kernel, LLM selector, About Me wizard
+- `config [get|set|list]` — view/edit runtime config (Court-gated for sensitive keys)
+
+**Runtime Control**
+- `start [--detached] [--resources ram=4GB]` — launch kernel & agent runtime
+- `stop` — graceful shutdown
+- `agent run <task>` — execute one-shot task in sandbox
+- `halt [--no-confirm]` — emergency freeze + rollback last mutation
+
+**Governance & Evolution**
+- `propose <type> <name> [--description <text>] [--diff-file <path>]` — submit self-mod (triggers Court)
+- `court list` — show pending/active proposals
+- `court view <id>` — display full reviews, scores, NASA board
+- `court qa <id> <question>` — ask reviewers for clarification
+- `court vote <id> <approve|reject|defer> [--notes <text>] [--conditions <json>]` — cast final user vote
+
+**Observability & Audit**
+- `status [--watch]` — current sandboxes, resources, pending Court items
+- `log list [--filter <proposal-id>] [--export <path>]` — view/export Merkle-signed audit trail
+- `snapshot create [--enterprise]` — generate frozen state + SBOM + regulatory mapping
+
+**Recovery**
+- `rollback <mutation-id>` — revert specific change
+- `update` — propose kernel/constitution upgrade (via Court)
+
+**Example Happy Path (Hobbyist)**
+```bash
+aegiscourt init                      # wizard → kernel hash abc123
+aegiscourt start
+aegiscourt propose add-tool "web_search" --description "..."
+# → Proposal ID: 001; Court completes in ~32s
+aegiscourt court view 001
+aegiscourt court vote 001 approve --confirm
+aegiscourt status
+```
+
+**Non-Functional CLI Requirements**
+- Startup <1s (no heavy deps).
+- All output human-readable by default; `--json` for automation.
+- Errors reference constitution rules (e.g., "Blocked: Rule 3 violation").
+- Every mutating command emits signed audit entry before/after.
+- Help system: rich `--help` per subcommand + examples.
+
+**Future Phase Considerations**
+- Web UI / TUI wrapper (Phase 2)
+- Multi-user / team profiles (Phase 2+)
+- Plugin CLI extensions (Court-approved skills)
+
+Link: See separate living document `docs/cli-design.md` for detailed command specs, flag tables, output formats, error codes, and evolution plan.
+
 ### 6. High-Level Architecture
 ```
 Kernel (immutable, signed)
