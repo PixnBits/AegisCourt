@@ -13,6 +13,7 @@ import (
 // SimpleAgent is a trivial agent that proposes self-improvements.
 type SimpleAgent struct {
 	kernel     *Kernel
+	agentID    string
 	memoryFile string
 	recent     []MemoryEntry
 }
@@ -25,8 +26,10 @@ type MemoryEntry struct {
 }
 
 func NewSimpleAgent(kernel *Kernel) *SimpleAgent {
+	agentID := kernel.RegisterAgent("simple self-evolving agent")
 	return &SimpleAgent{
 		kernel:     kernel,
+		agentID:    agentID,
 		memoryFile: kernel.config.DataDir + "/agent-memory.jsonl",
 		recent:     []MemoryEntry{},
 	}
@@ -55,7 +58,7 @@ Respond with valid JSON: {"description": "Improve main agent tool-calling prompt
 	}
 
 	// Submit
-	return a.kernel.SubmitProposal(ctx, proposal.Description, proposal.Diff)
+	return a.kernel.SubmitProposal(ctx, proposal.Description, proposal.Diff, a.agentID)
 }
 
 func (a *SimpleAgent) RunLoop(ctx context.Context) error {
@@ -112,7 +115,7 @@ Respond with valid JSON: {"description": "brief description", "diff": json_patch
 		}
 
 		// Submit
-		err = a.kernel.SubmitProposal(ctx, proposal.Description, proposal.Diff)
+		err = a.kernel.SubmitProposal(ctx, proposal.Description, proposal.Diff, a.agentID)
 		outcome := "approved"
 		if err != nil {
 			outcome = "rejected"

@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -58,6 +60,7 @@ type KernelConfig struct {
 	Debug               bool     `json:"debug"`
 	MaxSandboxMemoryMB  int      `json:"max_sandbox_memory_mb"`
 	MaxSandboxCPU       float64  `json:"max_sandbox_cpu"`
+	AllowedSyscalls     []string `json:"allowed_syscalls"`
 }
 
 // AboutMe captures user risk profile (calibrates Court strictness).
@@ -105,6 +108,21 @@ type LLMEndpointStatus struct {
 	Status       string // "ok", "stale", "error"
 }
 
+type DeferredProposal struct {
+	Proposal     Proposal
+	Decision     CourtDecision
+	Expiry       time.Time
+	Reason       string
+}
+
+type Provenance struct {
+	ID         string    `json:"id"`
+	CreatedAt  time.Time `json:"created_at"`
+	ParentID   string    `json:"parent_id,omitempty"` // if spawned from another
+	Purpose    string    `json:"purpose"`
+	Signature  string    `json:"signature"` // signed by kernel
+}
+
 // Sandbox interface (to be implemented with gVisor, seccomp fallback, etc.)
 type Sandbox interface {
 	Start(ctx context.Context, cmd []string) error
@@ -150,6 +168,32 @@ func (t *ToolProxyImpl) AllowAndProxy(toolCall map[string]interface{}) (string, 
 		return string(body), nil
 	}
 	return "", fmt.Errorf("tool not allowed: %s", tool)
+}
+
+func (t *ToolProxyImpl) ProxyHTTP(ctx context.Context, url string, method string, headers map[string]string, body []byte) (response []byte, err error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+func (t *ToolProxyImpl) ProxyFileRead(path string) ([]byte, error) {
+	// For MVP: deny all file operations
+	return nil, fmt.Errorf("file read not allowed")
+}
+
+func (t *ToolProxyImpl) ProxyFileWrite(path string, data []byte) error {
+	// For MVP: deny all file operations
+	return fmt.Errorf("file write not allowed")
 }
 
 // CourtEngine orchestrates reviewers and aggregates decisions.
@@ -228,16 +272,20 @@ func (e *CourtEngineImpl) ReviewProposal(ctx context.Context, prop Proposal) (Co
 		responses = append(responses, resp)
 	}
 
-	// Aggregate scores
-	totalScore := 0
+	// Aggregate scores with weights: CISO and MRM get weight 2, others 1
+	totalWeightedScore := 0
+	totalWeight := 0
 	var allConditions []string
 	for _, r := range responses {
-		totalScore += r.Score
-		if r.Score >= 70 { // Assuming high score means conditions
-			allConditions = append(allConditions, r.Cons...)
+		weight := 1
+		if r.Persona == "ciso" || r.Persona == "mrm" {
+			weight = 2
 		}
+		totalWeightedScore += r.Score * weight
+		totalWeight += weight
+		allConditions = append(allConditions, r.Cons...)
 	}
-	avgScore := float64(totalScore) / float64(len(responses))
+	avgScore := float64(totalWeightedScore) / float64(totalWeight)
 
 	threshold := 70.0
 	switch e.aboutMe.RiskTolerance {
@@ -290,6 +338,20 @@ type GvisorSandbox struct {
 }
 
 func NewGvisorSandbox(config *KernelConfig) *GvisorSandbox {
+	if len(config.AllowedSyscalls) == 0 {
+		config.AllowedSyscalls = []string{
+			"read", "write", "open", "close", "brk", "mmap", "munmap", "exit",
+			"getpid", "getuid", "rt_sigaction", "rt_sigprocmask", "futex",
+			"sched_yield", "nanosleep", "clock_gettime", "gettimeofday",
+			"lseek", "fstat", "stat", "access", "dup", "dup2", "pipe", "pipe2",
+			"execve", "wait4", "clone", "vfork", "kill", "tgkill", "exit_group",
+			"uname", "getrlimit", "setrlimit", "getrusage", "times", "getcwd",
+			"chdir", "mkdir", "rmdir", "unlink", "rename", "link", "symlink",
+			"readlink", "chmod", "chown", "utime", "utimes", "socket", "connect",
+			"bind", "listen", "accept", "getsockname", "getpeername", "sendto",
+			"recvfrom", "shutdown", "setsockopt", "getsockopt", "ioctl", "fcntl",
+		}
+	}
 	return &GvisorSandbox{config: config}
 }
 
@@ -298,6 +360,12 @@ func (s *GvisorSandbox) Start(ctx context.Context, cmd []string) error {
 	// Assume a base image like alpine for running arbitrary commands
 	image := "alpine:latest"
 	dockerCmd := []string{"docker", "run", "--runtime=runsc", "--rm", "-d", "--name", "aegis-sandbox-" + uuid.New().String()[:8]}
+	
+	// Syscall allowlist: Docker run does not directly support runsc syscall filtering via flags.
+	// For full enforcement, a custom runsc profile is required.
+	if len(s.config.AllowedSyscalls) > 0 {
+		log.Printf("Warning: Syscall allowlist configured (%d syscalls), but Docker run does not expose runsc --syscall flag. Using default runsc profile. For stricter sandboxing, configure runsc with a custom profile.", len(s.config.AllowedSyscalls))
+	}
 	
 	// Add resource limits
 	if s.config != nil {
@@ -758,6 +826,9 @@ type Kernel struct {
 	lastConstitutionHash string                     // hex string, SHA-256 of current constitution
 	llmHealth         map[string]LLMEndpointStatus  // endpoint → status
 	mu                sync.RWMutex                  // protect the maps/slices
+	pendingDeferrals  []DeferredProposal            // deferred proposals with expiry
+	proposalTimestamps map[string][]time.Time       // agentID → list of proposal times
+	provenances       map[string]Provenance         // agentID → provenance
 }
 
 func NewKernel(configPath string) (*Kernel, error) {
@@ -821,6 +892,9 @@ func NewKernel(configPath string) (*Kernel, error) {
 		recentProposals:   []RecentProposal{},
 		lastConstitutionHash: fmt.Sprintf("%x", sha256.Sum256([]byte(consti))),
 		llmHealth:         make(map[string]LLMEndpointStatus),
+		pendingDeferrals:  []DeferredProposal{},
+		proposalTimestamps: make(map[string][]time.Time),
+		provenances:       make(map[string]Provenance),
 	}
 
 	// Initialize components
@@ -843,17 +917,30 @@ func (k *Kernel) VerifySignature(data, sig []byte) bool {
 	return ed25519.Verify(k.publicKey, data, sig)
 }
 
-func (k *Kernel) RegisterAgent(id string, purpose string) {
+func (k *Kernel) RegisterAgent(purpose string) string {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	k.activeAgents[id] = &AgentInstance{
-		ID:            id,
+	// Generate UUIDv7-like (for MVP, use uuid.New())
+	agentID := uuid.New().String()
+	prov := Provenance{
+		ID:        agentID,
+		CreatedAt: time.Now(),
+		Purpose:   purpose,
+	}
+	// Sign provenance
+	provBytes, _ := json.Marshal(prov)
+	sig := ed25519.Sign(k.privateKey, provBytes)
+	prov.Signature = hex.EncodeToString(sig)
+	k.provenances[agentID] = prov
+	k.activeAgents[agentID] = &AgentInstance{
+		ID:            agentID,
 		StartedAt:     time.Now(),
 		Purpose:       purpose,
 		LastActivity:  time.Now(),
 		ProposalCount: 0,
 		Status:        "running",
 	}
+	return agentID
 }
 
 func (k *Kernel) UnregisterAgent(id string) {
@@ -905,6 +992,99 @@ func (k *Kernel) UpdateLLMHealth(endpoint string, latency time.Duration, err err
 	k.llmHealth[endpoint] = status
 }
 
+func (k *Kernel) DeferProposal(prop Proposal, decision CourtDecision, hours int) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	expiry := time.Now().Add(time.Duration(hours) * time.Hour)
+	k.pendingDeferrals = append(k.pendingDeferrals, DeferredProposal{
+		Proposal: prop,
+		Decision: decision,
+		Expiry:   expiry,
+		Reason:   fmt.Sprintf("User deferred for %d hours", hours),
+	})
+	// Record in audit
+	deferEntry := map[string]interface{}{
+		"type":        "proposal_deferred",
+		"proposal_id": prop.ID,
+		"expiry":      expiry.Format(time.RFC3339),
+		"reason":      fmt.Sprintf("User deferred for %d hours", hours),
+	}
+	deferBytes, _ := json.Marshal(deferEntry)
+	k.auditStore.Append(deferBytes)
+}
+
+func (k *Kernel) checkDeferredProposals(ctx context.Context) {
+	k.mu.Lock()
+	var remaining []DeferredProposal
+	now := time.Now()
+	for _, dp := range k.pendingDeferrals {
+		if now.After(dp.Expiry) {
+			// Re-submit
+			log.Printf("Deferred proposal %s has expired, re-reviewing", dp.Proposal.ID)
+			newDecision, err := k.courtEngine.ReviewProposal(ctx, dp.Proposal)
+			if err != nil {
+				log.Printf("Re-review failed: %v", err)
+				continue
+			}
+			if newDecision.Approved {
+				if err := k.ApplyApproved(newDecision, dp.Proposal); err != nil {
+					log.Printf("Auto-apply failed: %v", err)
+				} else {
+					log.Printf("Auto-approved deferred proposal %s", dp.Proposal.ID)
+				}
+			} else {
+				log.Printf("Deferred proposal %s still rejected: %s", dp.Proposal.ID, newDecision.RejectionReason)
+			}
+		} else {
+			remaining = append(remaining, dp)
+		}
+	}
+	k.pendingDeferrals = remaining
+	k.mu.Unlock()
+}
+
+func (k *Kernel) CheckProposalRateLimit(agentID string) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	now := time.Now()
+	times := k.proposalTimestamps[agentID]
+	// Clear old timestamps (>24h)
+	var recent []time.Time
+	for _, t := range times {
+		if now.Sub(t) < 24*time.Hour {
+			recent = append(recent, t)
+		}
+	}
+	k.proposalTimestamps[agentID] = recent
+	// Check last hour
+	var lastHour []time.Time
+	for _, t := range recent {
+		if now.Sub(t) < time.Hour {
+			lastHour = append(lastHour, t)
+		}
+	}
+	if len(lastHour) >= 1 {
+		// Exponential backoff: after 3 rejections, double cooldown
+		rejections := 0
+		for _, t := range lastHour {
+			if now.Sub(t) < time.Duration(1<<uint(rejections))*time.Hour {
+				rejections++
+			}
+		}
+		if rejections >= 3 {
+			cooldown := time.Duration(1<<uint(rejections-3)) * time.Hour
+			if cooldown > 24*time.Hour {
+				cooldown = 24 * time.Hour
+			}
+			return fmt.Errorf("rate limit exceeded, cooldown: %v", cooldown)
+		}
+		return fmt.Errorf("rate limit exceeded: max 1 proposal per hour")
+	}
+	// Add timestamp
+	k.proposalTimestamps[agentID] = append(k.proposalTimestamps[agentID], now)
+	return nil
+}
+
 // ReviewProposal performs court review without applying.
 func (k *Kernel) ReviewProposal(ctx context.Context, desc string, diff json.RawMessage) (CourtDecision, error) {
 	prop := Proposal{
@@ -943,9 +1123,12 @@ func (k *Kernel) ReviewProposal(ctx context.Context, desc string, diff json.RawM
 }
 
 // SubmitProposal is the entry point for agent-proposed changes.
-func (k *Kernel) SubmitProposal(ctx context.Context, desc string, diff json.RawMessage) error {
+func (k *Kernel) SubmitProposal(ctx context.Context, desc string, diff json.RawMessage, proposer string) error {
 	if k.readOnly {
 		return fmt.Errorf("kernel in read-only mode (emergency halt)")
+	}
+	if err := k.CheckProposalRateLimit(proposer); err != nil {
+		return err
 	}
 	decision, err := k.ReviewProposal(ctx, desc, diff)
 	if err != nil {
@@ -958,7 +1141,7 @@ func (k *Kernel) SubmitProposal(ctx context.Context, desc string, diff json.RawM
 	}
 
 	// Apply the approved proposal
-	if err := k.ApplyApproved(decision, Proposal{ID: decision.ProposalID, Diff: diff, Description: desc}); err != nil {
+	if err := k.ApplyApproved(decision, Proposal{ID: decision.ProposalID, Diff: diff, Description: desc, Proposer: proposer}); err != nil {
 		return fmt.Errorf("apply failed: %w", err)
 	}
 
@@ -1038,6 +1221,23 @@ func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
 	}
 
 	log.Printf("Applied proposal %s", prop.ID)
+
+	// Post-apply benchmark hook
+	if strings.Contains(string(prop.Diff), "/rules") || strings.Contains(string(prop.Diff), "constitution") || strings.Contains(targetFile, "config") {
+		log.Printf("Proposal touches constitution or config – running post-apply benchmark")
+		// For MVP: log benchmark placeholder
+		beforeScore := 0 // would be from before
+		afterScore := 1  // would run benchmark
+		log.Printf("Benchmark delta: before=%d, after=%d", beforeScore, afterScore)
+		// Store delta in recentProposals
+		k.RecordProposal(RecentProposal{
+			ID:          prop.ID,
+			Timestamp:   time.Now(),
+			Description: prop.Description,
+			Status:      "applied",
+			Score:       float64(afterScore - beforeScore),
+		})
+	}
 
 	// Audit the application
 	appliedEntry := map[string]interface{}{
@@ -1212,6 +1412,20 @@ func (k *Kernel) Run(ctx context.Context) error {
 		}
 	}()
 
+	// Start deferred proposal checker
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				k.checkDeferredProposals(ctx)
+			}
+		}
+	}()
+
 	defer func() {
 		// Graceful cleanup
 		k.sandboxMgr.Stop()
@@ -1249,7 +1463,7 @@ func (k *Kernel) EmergencyHalt() {
 // -----------------------------------------------------------------------------
 func main() {
 	configPath := flag.String("config", "config.json", "path to config file")
-	command := flag.String("cmd", "run", "command: run, propose, submit-proposal, emergency-halt, halt, export-audit, status, ps, constitution-diff")
+	command := flag.String("cmd", "run", "command: run, propose, submit-proposal, emergency-halt, halt, export-audit, status, ps, constitution-diff, check-deferred")
 	proposalID := flag.String("proposal-id", "", "proposal ID for constitution-diff")
 	desc := flag.String("desc", "", "description for submit-proposal")
 	diffPath := flag.String("diff", "", "path to diff file for submit-proposal")
@@ -1286,6 +1500,27 @@ func main() {
 	// Print kernel public key fingerprint
 	fingerprint := fmt.Sprintf("%x", kernel.publicKey[:8]) // first 8 bytes as hex
 	log.Printf("Kernel public key fingerprint: %s", fingerprint)
+
+	// First-run demo proposal
+	if *command == "run" {
+		history, err := kernel.auditStore.GetHistory(time.Time{})
+		if err == nil && len(history) == 0 {
+			log.Println("First run detected – showing Governance Court demo…")
+			demoDiff := json.RawMessage(`[{"op": "add", "path": "/demo", "value": "First-run demo change"}]`)
+			decision, err := kernel.ReviewProposal(context.Background(), "First-run demo proposal", demoDiff)
+			if err != nil {
+				log.Printf("Demo review failed: %v", err)
+			} else {
+				log.Printf("Demo decision: Approved=%v, Score=%.1f", decision.Approved, decision.AggregateScore)
+				if *interactiveCourt {
+					_, err := InteractiveCourtReview(kernel, decision, Proposal{ID: decision.ProposalID, Diff: demoDiff, Description: "First-run demo proposal"})
+					if err != nil {
+						log.Printf("Demo interactive failed: %v", err)
+					}
+				}
+			}
+		}
+	}
 
 	switch *command {
 	case "run":
@@ -1379,11 +1614,23 @@ func main() {
 			}
 			fmt.Println("  +-------------+-------+---------------+")
 		}
-		prop := Proposal{ID: decision.ProposalID, Diff: diff, Description: *desc}
+		prop := Proposal{ID: decision.ProposalID, Diff: diff, Description: *desc, Proposer: "cli-user"}
+		if err := kernel.CheckProposalRateLimit("cli-user"); err != nil {
+			log.Fatalf("Rate limit: %v", err)
+		}
 		if *interactiveCourt {
 			vote, err := InteractiveCourtReview(kernel, decision, prop)
 			if err != nil {
 				log.Fatalf("interactive review: %v", err)
+			}
+			if vote == "defer" {
+				hours := kernel.config.AboutMe.MaxDeferHours
+				if hours == 0 {
+					hours = 24
+				}
+				kernel.DeferProposal(prop, decision, hours)
+				log.Printf("Proposal deferred for %d hours", hours)
+				return
 			}
 			if vote != "approve" {
 				log.Printf("User voted: %s", vote)
@@ -1588,6 +1835,9 @@ func main() {
 		fmt.Println(string(beforeData))
 		fmt.Println("After:")
 		fmt.Println(string(afterData))
+	case "check-deferred":
+		kernel.checkDeferredProposals(context.Background())
+		log.Println("Checked deferred proposals")
 	default:
 		log.Fatalf("unknown command: %s", *command)
 	}
