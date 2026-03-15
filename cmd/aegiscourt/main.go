@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/cbergoon/merkletree"
+	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/google/uuid"
 )
 
@@ -47,11 +48,13 @@ type CourtDecision struct {
 
 // KernelConfig holds runtime configuration (loaded from file + env).
 type KernelConfig struct {
-	DataDir          string   `json:"data_dir"`
-	ConstitutionPath string   `json:"constitution_path"`
-	LLMEndpoints     []string `json:"llm_endpoints"` // e.g. ["http://localhost:11434", "https://api.groq.com"]
-	AboutMe          AboutMe  `json:"about_me"`
-	Debug            bool     `json:"debug"`
+	DataDir             string   `json:"data_dir"`
+	ConstitutionPath    string   `json:"constitution_path"`
+	LLMEndpoints        []string `json:"llm_endpoints"` // e.g. ["http://localhost:11434", "https://api.groq.com"]
+	AboutMe             AboutMe  `json:"about_me"`
+	Debug               bool     `json:"debug"`
+	MaxSandboxMemoryMB  int      `json:"max_sandbox_memory_mb"`
+	MaxSandboxCPU       float64  `json:"max_sandbox_cpu"`
 }
 
 // AboutMe captures user risk profile (calibrates Court strictness).
@@ -84,33 +87,93 @@ type CourtEngine interface {
 	ReviewProposal(ctx context.Context, prop Proposal) (CourtDecision, error)
 }
 
-// DummyCourtEngine implements CourtEngine with hardcoded dummy reviewers.
-type DummyCourtEngine struct{}
+// CourtEngineImpl implements CourtEngine with real LLM-based reviewers.
+type CourtEngineImpl struct {
+	router      LLMRouter
+	constitution string
+	aboutMe     AboutMe
+}
 
-func (e *DummyCourtEngine) ReviewProposal(ctx context.Context, prop Proposal) (CourtDecision, error) {
-	// Simulate 6 reviewers
-	personas := []string{"ciso", "mrm", "compliance", "ethics", "sre", "helpfulness"}
-	totalScore := 0
-	for range personas {
-		// Random score 60-98
-		score := 60 + (int(uuid.New().ID()) % 39)
-		totalScore += score
+func NewCourtEngine(router LLMRouter, consti string, about AboutMe) *CourtEngineImpl {
+	return &CourtEngineImpl{
+		router:      router,
+		constitution: consti,
+		aboutMe:     about,
 	}
-	avgScore := float64(totalScore) / float64(len(personas))
-	approved := avgScore > 70.0
+}
 
+func (e *CourtEngineImpl) ReviewProposal(ctx context.Context, prop Proposal) (CourtDecision, error) {
+	personas := []string{"ciso", "mrm", "compliance-regulatory", "helpfulness-evolution", "responsible-ai", "sre"}
+	var responses []ReviewerResponse
+
+	for _, persona := range personas {
+		template, err := e.loadReviewerTemplate(persona)
+		if err != nil {
+			log.Printf("failed to load template for %s: %v", persona, err)
+			// Fallback response
+			responses = append(responses, ReviewerResponse{Persona: persona, Score: 50, Recommendation: "Defer"})
+			continue
+		}
+
+		prompt := template + "\n\nProposal Description:\n" + prop.Description + "\n\nProposed Diff:\n" + string(prop.Diff) + "\n\nOutput ONLY valid JSON matching the format shown at the bottom of the template."
+
+		response, err := e.router.Dispatch(ctx, prompt, "llama3.2")
+		if err != nil {
+			log.Printf("LLM dispatch failed for %s: %v", persona, err)
+			responses = append(responses, ReviewerResponse{Persona: persona, Score: 50, Recommendation: "Defer"})
+			continue
+		}
+
+		var resp ReviewerResponse
+		if err := json.Unmarshal([]byte(response), &resp); err != nil {
+			log.Printf("failed to parse response for %s: %v, response: %s", persona, err, response)
+			responses = append(responses, ReviewerResponse{Persona: persona, Score: 50, Recommendation: "Defer"})
+			continue
+		}
+		resp.Persona = persona // Ensure persona is set
+		responses = append(responses, resp)
+	}
+
+	// Aggregate scores
+	totalScore := 0
+	var allConditions []string
+	for _, r := range responses {
+		totalScore += r.Score
+		if r.Score >= 70 { // Assuming high score means conditions
+			allConditions = append(allConditions, r.Cons...)
+		}
+	}
+	avgScore := float64(totalScore) / float64(len(responses))
+
+	threshold := 70.0
+	switch e.aboutMe.RiskTolerance {
+	case "paranoid":
+		threshold = 90.0
+	case "financial":
+		threshold = 80.0
+	}
+
+	approved := avgScore >= threshold
 	decision := CourtDecision{
 		ProposalID:     prop.ID,
 		AggregateScore: avgScore,
 		Approved:       approved,
+		Conditions:     allConditions,
 	}
-	if approved {
-		decision.Conditions = []string{"Monitor for side effects", "Log all executions"}
-	} else {
-		decision.RejectionReason = "Insufficient aggregate score"
+	if !approved {
+		decision.RejectionReason = "Aggregate score below threshold"
 	}
 
 	return decision, nil
+}
+
+func (e *CourtEngineImpl) loadReviewerTemplate(persona string) (string, error) {
+	path := fmt.Sprintf("reviewers/%s.md", persona)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // AuditStore provides tamper-evident logging.
@@ -124,13 +187,22 @@ type AuditStore interface {
 type GvisorSandbox struct {
 	containerID string
 	running     bool
+	config      *KernelConfig
 }
 
 func (s *GvisorSandbox) Start(ctx context.Context, cmd []string) error {
 	// Use Docker with gvisor runtime to run the command in a sandbox
 	// Assume a base image like alpine for running arbitrary commands
 	image := "alpine:latest"
-	dockerCmd := []string{"docker", "run", "--runtime=runsc", "--rm", "-d", "--name", "aegis-sandbox-" + uuid.New().String()[:8], image}
+	dockerCmd := []string{"docker", "run", "--runtime=runsc", "--rm", "-d", "--name", "aegis-sandbox-" + uuid.New().String()[:8]}
+	
+	// Add resource limits
+	if s.config != nil {
+		dockerCmd = append(dockerCmd, "--memory", fmt.Sprintf("%dMB", s.config.MaxSandboxMemoryMB))
+		dockerCmd = append(dockerCmd, "--cpus", fmt.Sprintf("%.1f", s.config.MaxSandboxCPU))
+	}
+	
+	dockerCmd = append(dockerCmd, image)
 	dockerCmd = append(dockerCmd, cmd...)
 	
 	execCmd := exec.CommandContext(ctx, dockerCmd[0], dockerCmd[1:]...)
@@ -223,78 +295,7 @@ type ReviewerResponse struct {
 	// Additional fields vary by persona
 }
 
-// CourtEngineImpl implements CourtEngine.
-type CourtEngineImpl struct {
-	router      LLMRouter
-	constitution Constitution
-	aboutMe     AboutMe
-}
 
-func NewCourtEngine(router LLMRouter, consti Constitution, about AboutMe) *CourtEngineImpl {
-	return &CourtEngineImpl{
-		router:      router,
-		constitution: consti,
-		aboutMe:     about,
-	}
-}
-
-func (c *CourtEngineImpl) ReviewProposal(ctx context.Context, prop Proposal) (CourtDecision, error) {
-	// Load reviewer templates
-	personas := []string{"ciso", "mrm", "compliance-regulatory", "helpfulness-evolution", "responsible-ai", "sre"}
-	responses := make([]ReviewerResponse, 0, len(personas))
-
-	for _, persona := range personas {
-		template, err := c.loadReviewerTemplate(persona)
-		if err != nil {
-			return CourtDecision{}, err
-		}
-		prompt := fmt.Sprintf("%s\n\nProposal: %s\nDiff: %s", template, prop.Description, string(prop.Diff))
-		response, err := c.router.Dispatch(ctx, prompt, "llama3.2") // Assume model
-		if err != nil {
-			return CourtDecision{}, err
-		}
-		var resp ReviewerResponse
-		json.Unmarshal([]byte(response), &resp)
-		responses = append(responses, resp)
-	}
-
-	// Aggregate: average score, approve if > threshold based on aboutMe
-	totalScore := 0
-	for _, r := range responses {
-		totalScore += r.Score
-	}
-	avgScore := float64(totalScore) / float64(len(responses))
-
-	threshold := 70.0 // default
-	switch c.aboutMe.RiskTolerance {
-	case "paranoid":
-		threshold = 90.0
-	case "financial":
-		threshold = 80.0
-	}
-
-	approved := avgScore >= threshold
-	decision := CourtDecision{
-		ProposalID:     prop.ID,
-		AggregateScore: avgScore,
-		Approved:       approved,
-	}
-
-	if !approved {
-		decision.RejectionReason = "Aggregate score below threshold"
-	}
-
-	return decision, nil
-}
-
-func (c *CourtEngineImpl) loadReviewerTemplate(persona string) (string, error) {
-	path := fmt.Sprintf("reviewers/%s.md", persona)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
 
 // AuditEntry implements merkletree.Content.
 type MerkleAuditEntry struct {
@@ -369,14 +370,18 @@ type AuditEntry struct {
 
 // FlatFileAuditStore implements AuditStore using flat files with signatures.
 type FlatFileAuditStore struct {
-	filePath  string
-	prevHash  string
+	filePath   string
+	prevHash   string
+	privateKey ed25519.PrivateKey
+	publicKey  ed25519.PublicKey
 }
 
-func NewFlatFileAuditStore(filePath string) *FlatFileAuditStore {
+func NewFlatFileAuditStore(filePath string, privateKey ed25519.PrivateKey, publicKey ed25519.PublicKey) *FlatFileAuditStore {
 	return &FlatFileAuditStore{
-		filePath: filePath,
-		prevHash: "",
+		filePath:   filePath,
+		prevHash:   "",
+		privateKey: privateKey,
+		publicKey:  publicKey,
 	}
 }
 
@@ -388,10 +393,20 @@ func (a *FlatFileAuditStore) Append(entry json.RawMessage) error {
 		PrevHash:    a.prevHash,
 		PayloadHash: payloadHashStr,
 		Data:        entry,
-		Sig:         "", // TODO: sign with kernel key
+		Sig:         "", // Will set after marshal
 	}
 
 	auditBytes, err := json.Marshal(auditEntry)
+	if err != nil {
+		return err
+	}
+
+	// Sign the marshaled entry
+	sig := ed25519.Sign(a.privateKey, auditBytes)
+	auditEntry.Sig = hex.EncodeToString(sig)
+
+	// Re-marshal with sig
+	auditBytes, err = json.Marshal(auditEntry)
 	if err != nil {
 		return err
 	}
@@ -440,25 +455,36 @@ func (a *FlatFileAuditStore) VerifyIntegrity() error {
 	}
 	lines := strings.Split(string(data), "\n")
 	expectedPrev := ""
-	for _, line := range lines {
+	for i, line := range lines {
 		if line == "" {
 			continue
 		}
 		var entry AuditEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			return err
+			return fmt.Errorf("unmarshal entry %d: %v", i, err)
 		}
 		if entry.PrevHash != expectedPrev {
-			return fmt.Errorf("chain broken at entry")
+			return fmt.Errorf("chain broken at entry %d", i)
 		}
 		// Verify payload hash
 		payloadHash := sha256.Sum256(entry.Data)
 		if hex.EncodeToString(payloadHash[:]) != entry.PayloadHash {
-			return fmt.Errorf("payload hash mismatch")
+			return fmt.Errorf("payload hash mismatch at entry %d", i)
+		}
+		// Verify signature
+		entryForSig := entry
+		entryForSig.Sig = "" // Remove sig for verification
+		entryBytes, _ := json.Marshal(entryForSig)
+		sigBytes, err := hex.DecodeString(entry.Sig)
+		if err != nil {
+			return fmt.Errorf("invalid sig hex at entry %d: %v", i, err)
+		}
+		if !ed25519.Verify(a.publicKey, entryBytes, sigBytes) {
+			return fmt.Errorf("invalid signature at entry %d", i)
 		}
 		// Update expectedPrev
-		entryBytes, _ := json.Marshal(entry)
-		entryHash := sha256.Sum256(entryBytes)
+		entryBytesWithSig, _ := json.Marshal(entry)
+		entryHash := sha256.Sum256(entryBytesWithSig)
 		expectedPrev = hex.EncodeToString(entryHash[:])
 	}
 	return nil
@@ -496,6 +522,12 @@ func loadConfig(path string) (KernelConfig, error) {
 	}
 	if cfg.AboutMe.MaxDeferHours == 0 {
 		cfg.AboutMe.MaxDeferHours = 24
+	}
+	if cfg.MaxSandboxMemoryMB == 0 {
+		cfg.MaxSandboxMemoryMB = 512
+	}
+	if cfg.MaxSandboxCPU == 0 {
+		cfg.MaxSandboxCPU = 1.0
 	}
 
 	// Validate required fields
@@ -578,10 +610,10 @@ func NewKernel(configPath string) (*Kernel, error) {
 	}
 
 	// Initialize components
-	k.sandboxMgr = &GvisorSandbox{}
+	k.sandboxMgr = &GvisorSandbox{config: &cfg}
 	k.llmRouter = NewOllamaRouter(cfg.LLMEndpoints)
-	k.courtEngine = &DummyCourtEngine{}
-	k.auditStore = NewFlatFileAuditStore(filepath.Join(cfg.DataDir, "audit.log"))
+	k.courtEngine = NewCourtEngine(k.llmRouter, consti, cfg.AboutMe)
+	k.auditStore = NewFlatFileAuditStore(filepath.Join(cfg.DataDir, "audit.log"), priv, pub)
 
 	return k, nil
 }
@@ -638,29 +670,62 @@ func (k *Kernel) SubmitProposal(ctx context.Context, desc string, diff json.RawM
 
 // ApplyApproved applies the approved proposal.
 func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
-	// Save current state as backup
-	statePath := filepath.Join(k.config.DataDir, "current_state.json")
-	backupPath := filepath.Join(k.config.DataDir, "versions", prop.ID+".json")
-	os.MkdirAll(filepath.Dir(backupPath), 0700)
-	if data, err := json.Marshal(k.currentState); err == nil {
-		os.WriteFile(backupPath, data, 0600)
-		os.WriteFile(statePath, data, 0600) // also update current
+	// For MVP, assume diff is JSON Patch for constitution or config
+	// Determine target: if diff contains "constitution", modify constitution, else config
+
+	var targetFile string
+	var currentJSON []byte
+	var err error
+
+	if strings.Contains(string(prop.Diff), "constitution") {
+		targetFile = filepath.Join(k.config.DataDir, "constitution.json")
+		currentJSON, err = json.Marshal(map[string]interface{}{"content": k.constitution})
+	} else {
+		targetFile = filepath.Join(k.config.DataDir, "config.json")
+		currentJSON, err = json.Marshal(k.config)
 	}
-
-	// "Apply" diff (stub: just log)
-	log.Printf("Applying diff: %s", string(prop.Diff))
-
-	// Sign new state
-	stateBytes, _ := json.Marshal(k.currentState)
-	sig, err := k.Sign(stateBytes)
 	if err != nil {
 		return err
 	}
+
+	// Apply JSON Patch
+	patch, err := jsonpatch.DecodePatch(prop.Diff)
+	if err != nil {
+		return fmt.Errorf("invalid patch: %w", err)
+	}
+	modified, err := patch.Apply(currentJSON)
+	if err != nil {
+		return fmt.Errorf("patch apply failed: %w", err)
+	}
+
+	// Backup current
+	backupPath := filepath.Join(k.config.DataDir, "versions", prop.ID+".json")
+	os.MkdirAll(filepath.Dir(backupPath), 0700)
+	if err := os.WriteFile(backupPath, currentJSON, 0600); err != nil {
+		return err
+	}
+
+	// Save modified
+	if err := os.WriteFile(targetFile, modified, 0600); err != nil {
+		return err
+	}
+
+	// Update in-memory if constitution
+	if strings.Contains(string(prop.Diff), "constitution") {
+		var newConst map[string]interface{}
+		json.Unmarshal(modified, &newConst)
+		if content, ok := newConst["content"].(string); ok {
+			k.constitution = content
+		}
+	}
+
+	log.Printf("Applied proposal %s", prop.ID)
+
+	// Audit the application
 	appliedEntry := map[string]interface{}{
 		"type":       "applied",
 		"proposal_id": prop.ID,
-		"state":      k.currentState,
-		"sig":        sig,
+		"target":     targetFile,
 	}
 	appliedBytes, _ := json.Marshal(appliedEntry)
 	return k.auditStore.Append(appliedBytes)
@@ -669,21 +734,45 @@ func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
 // Rollback reverts to a previous state.
 func (k *Kernel) Rollback(proposalID string) error {
 	versionsDir := filepath.Join(k.config.DataDir, "versions")
-	_, err := os.ReadDir(versionsDir)
-	if err != nil {
-		return err
-	}
-	// Find the latest backup before this ID (stub: just use the one with ID)
 	backupPath := filepath.Join(versionsDir, proposalID+".json")
 	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(data, &k.currentState); err != nil {
+
+	// Determine target
+	var targetFile string
+	var inMemory *string
+	if strings.Contains(string(data), "constitution") {
+		targetFile = filepath.Join(k.config.DataDir, "constitution.json")
+		inMemory = &k.constitution
+	} else {
+		targetFile = filepath.Join(k.config.DataDir, "config.json")
+		// For config, reload
+	}
+
+	if err := os.WriteFile(targetFile, data, 0600); err != nil {
 		return err
 	}
-	statePath := filepath.Join(k.config.DataDir, "current_state.json")
-	return os.WriteFile(statePath, data, 0600)
+
+	// Update in-memory
+	if inMemory != nil {
+		var restored map[string]interface{}
+		json.Unmarshal(data, &restored)
+		if content, ok := restored["content"].(string); ok {
+			*inMemory = content
+		}
+	}
+
+	log.Printf("Rolled back proposal %s", proposalID)
+
+	// Audit the rollback
+	rollbackEntry := map[string]interface{}{
+		"type":        "rollback",
+		"proposal_id": proposalID,
+	}
+	rollbackBytes, _ := json.Marshal(rollbackEntry)
+	return k.auditStore.Append(rollbackBytes)
 }
 
 // Run starts the kernel main loop (proposal listener, health checks, etc.)
@@ -724,6 +813,7 @@ func main() {
 	// New flags for propose
 	proposeDesc := flag.String("propose-desc", "", "description for propose command")
 	proposeDiff := flag.String("propose-diff", "", "diff JSON for propose command")
+	withAgent := flag.Bool("with-agent", false, "spawn simple agent")
 	flag.Parse()
 
 	kernel, err := NewKernel(*configPath)
@@ -739,6 +829,17 @@ func main() {
 	case "run":
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+
+		if *withAgent {
+			agent := NewSimpleAgent(kernel)
+			go func() {
+				// Run agent once for demo
+				if err := agent.RunOnce(ctx); err != nil {
+					log.Printf("Agent run failed: %v", err)
+				}
+			}()
+		}
+
 		if err := kernel.Run(ctx); err != nil {
 			log.Printf("kernel exited: %v", err)
 			os.Exit(1)
