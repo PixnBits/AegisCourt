@@ -48,6 +48,16 @@ The user always retains ultimate sovereignty:
 - User can propose constitution amendments via Court (requires supermajority reasoning + explicit vote).  
 - No rule may remove or weaken user override.
 
+**Rule 11 – Agent Identity & Provenance**  
+All agents must maintain verifiable identity chains: each agent instance is spawned with a unique ID, signed by the kernel, and includes provenance metadata (creation time, parent agent, purpose). Agents cannot impersonate other agents or forge their identity. Identity checks are enforced in all inter-agent communications and sandbox boundaries.
+
+**Rule 12 – Anti-DoS & Proposal Rate Limiting**  
+To prevent denial-of-service via excessive proposals or computations:  
+- Agents are rate-limited to 1 proposal per hour, with exponential backoff on rejections.  
+- Court reviews are throttled to 10 per day per user.  
+- Sandbox executions are limited to 100 CPU-seconds per day per agent.  
+- Violations trigger automatic deferral or halt.
+
 ### How This Fits AegisCourt
 - **Stored & Enforced**: The constitution lives as a versioned file inside the immutable kernel. The Governance Court Engine loads it to generate reviewer prompts (e.g., "Evaluate proposal against Rule 3: Isolation...").
 - **Profile Calibration**: "About Me" sliders adjust thresholds (e.g., hobbyist → lower confirmation for low-impact changes; financial persona → stricter on Rule 4).

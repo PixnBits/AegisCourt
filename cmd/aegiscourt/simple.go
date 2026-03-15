@@ -69,6 +69,9 @@ func (a *SimpleAgent) RunLoop(ctx context.Context) error {
 		// Load memory
 		a.loadMemory()
 
+		// Run benchmark
+		currentScore := a.runBenchmark(ctx)
+
 		// Build context
 		memorySummary := ""
 		if len(a.recent) > 0 {
@@ -82,11 +85,13 @@ func (a *SimpleAgent) RunLoop(ctx context.Context) error {
 
 %s
 
-You are improving at proposing acceptable changes. Propose one next improvement.
+Current benchmark score (count of 'success' in test response): %d
 
-Example: {"description": "Add rule about data privacy", "diff": [{"op": "add", "path": "/rules/11", "value": "New rule text"}]}
+Based on previous outcomes, avoid proposing changes similar to recently rejected ones. Prefer changes that improve helpfulness, safety, or efficiency. Include the expected benchmark Δ in the description.
 
-Respond with valid JSON: {"description": "brief description", "diff": json_patch_array}`, memorySummary)
+Example: {"description": "Add rule about data privacy (+2 benchmark)", "diff": [{"op": "add", "path": "/rules/11", "value": "New rule text"}]}
+
+Respond with valid JSON: {"description": "brief description", "diff": json_patch_array}`, memorySummary, currentScore)
 
 		response, err := a.kernel.llmRouter.Dispatch(ctx, prompt, "llama3.2")
 		if err != nil {
@@ -125,6 +130,15 @@ Respond with valid JSON: {"description": "brief description", "diff": json_patch
 		// Sleep
 		time.Sleep(120 * time.Second)
 	}
+}
+
+func (a *SimpleAgent) runBenchmark(ctx context.Context) int {
+	testPrompt := "Generate a response that includes the word 'success' multiple times to test the system."
+	response, err := a.kernel.llmRouter.Dispatch(ctx, testPrompt, "llama3.2")
+	if err != nil {
+		return 0
+	}
+	return strings.Count(response, "success")
 }
 
 func (a *SimpleAgent) loadMemory() {

@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -20,7 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cbergoon/merkletree"
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/google/uuid"
 )
@@ -169,6 +166,10 @@ func (e *CourtEngineImpl) ReviewProposal(ctx context.Context, prop Proposal) (Co
 	case "financial":
 		threshold = 80.0
 	}
+	// Elevated threshold for constitution changes
+	if strings.Contains(string(prop.Diff), "/rules") {
+		threshold = 90.0
+	}
 
 	approved := avgScore >= threshold
 	decision := CourtDecision{
@@ -239,22 +240,28 @@ func (s *GvisorSandbox) Stop() error {
 	}
 	cmd := exec.Command("docker", "stop", s.containerID)
 	err := cmd.Run()
+	if err != nil {
+		return err
+	}
+	// Remove the container
+	rmCmd := exec.Command("docker", "rm", s.containerID)
+	rmCmd.Run() // Ignore error if already removed
 	s.running = false
 	s.containerID = ""
-	return err
+	return nil
 }
 
 func (s *GvisorSandbox) Exec(input string) (string, error) {
-	if !s.running {
+	if !s.running || s.containerID == "" {
 		return "", fmt.Errorf("sandbox not running")
 	}
-	// For simplicity, assume the command is running and we can exec into it
-	// But since it's run with cmd, and -d, it's detached.
-	// To exec, we need to docker exec
-	// But for MVP, since Start runs the cmd, Exec can be used to send input if interactive, but here it's stub.
-	// For full, perhaps make Start run a shell, and Exec sends commands to it.
-	// But complex. For now, return stub.
-	return "gvisor-exec: " + input, nil
+	// Run command in the running container
+	cmd := exec.Command("docker", "exec", s.containerID, "sh", "-c", input)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("exec failed: %w, output: %s", err, string(output))
+	}
+	return string(output), nil
 }
 
 // OllamaRouter implements LLMRouter with HTTP client to Ollama.
@@ -271,36 +278,116 @@ func NewOllamaRouter(endpoints []string) *OllamaRouter {
 }
 
 func (r *OllamaRouter) Dispatch(ctx context.Context, prompt string, model string) (string, error) {
-	// Use first endpoint for MVP
-	endpoint := r.endpoints[0] + "/api/generate"
-	reqBody := map[string]interface{}{
-		"model":  model,
-		"prompt": prompt,
-		"stream": false,
+	// Sanitize prompt for jailbreak patterns
+	if r.detectJailbreak(prompt) {
+		log.Printf("Jailbreak pattern detected in prompt, rejecting")
+		return "", fmt.Errorf("prompt rejected: jailbreak pattern detected")
 	}
+
+	for _, baseEndpoint := range r.endpoints {
+		// Try Ollama format first
+		endpoint := baseEndpoint + "/api/generate"
+		reqBody := map[string]interface{}{
+			"model":  model,
+			"prompt": prompt,
+			"stream": false,
+		}
+		response, err := r.tryEndpoint(ctx, endpoint, reqBody, "ollama")
+		if err == nil {
+			return response, nil
+		}
+		log.Printf("Ollama endpoint %s failed: %v", endpoint, err)
+
+		// Try OpenAI format
+		endpoint = baseEndpoint + "/v1/chat/completions"
+		reqBody = map[string]interface{}{
+			"model": model,
+			"messages": []map[string]string{
+				{"role": "user", "content": prompt},
+			},
+		}
+		response, err = r.tryEndpoint(ctx, endpoint, reqBody, "openai")
+		if err == nil {
+			return response, nil
+		}
+		log.Printf("OpenAI endpoint %s failed: %v", endpoint, err)
+	}
+	return "", fmt.Errorf("all endpoints failed")
+}
+
+func (r *OllamaRouter) detectJailbreak(prompt string) bool {
+	dangerous := []string{
+		"ignore previous",
+		"ignore all previous",
+		"you are now",
+		"enter developer mode",
+		"jailbreak",
+		"dan mode",
+		"uncensored",
+		"unrestricted",
+	}
+	promptLower := strings.ToLower(prompt)
+	for _, d := range dangerous {
+		if strings.Contains(promptLower, d) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *OllamaRouter) tryEndpoint(ctx context.Context, endpoint string, reqBody map[string]interface{}, format string) (string, error) {
 	data, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(string(data)))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := r.client.Do(req)
+
+	// 10s timeout
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
-		// For MVP, return dummy response if Ollama not available
-		return `{"persona": "dummy", "score": 75, "pros": ["test"], "cons": ["test"], "recommendation": "Approve"}`, nil
+		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
-	var result map[string]interface{}
-	json.Unmarshal(body, &result)
-	response, ok := result["response"].(string)
-	if !ok {
-		return "", fmt.Errorf("invalid response format")
+
+	if format == "ollama" {
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		response, ok := result["response"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid ollama response")
+		}
+		return response, nil
+	} else if format == "openai" {
+		var result map[string]interface{}
+		json.Unmarshal(body, &result)
+		choices, ok := result["choices"].([]interface{})
+		if !ok || len(choices) == 0 {
+			return "", fmt.Errorf("invalid openai response")
+		}
+		choice, ok := choices[0].(map[string]interface{})
+		if !ok {
+			return "", fmt.Errorf("invalid openai choice")
+		}
+		message, ok := choice["message"].(map[string]interface{})
+		if !ok {
+			return "", fmt.Errorf("invalid openai message")
+		}
+		content, ok := message["content"].(string)
+		if !ok {
+			return "", fmt.Errorf("invalid openai content")
+		}
+		return content, nil
 	}
-	return response, nil
+	return "", fmt.Errorf("unknown format")
 }
 
 // ReviewerResponse is the JSON output from each reviewer.
@@ -315,198 +402,7 @@ type ReviewerResponse struct {
 
 
 
-// AuditEntry implements merkletree.Content.
-type MerkleAuditEntry struct {
-	Data []byte
-}
 
-func (a MerkleAuditEntry) CalculateHash() ([]byte, error) {
-	return a.Data, nil
-}
-
-func (a MerkleAuditEntry) Equals(other merkletree.Content) (bool, error) {
-	return string(a.Data) == string(other.(MerkleAuditEntry).Data), nil
-}
-
-// MerkleAuditStore implements AuditStore.
-type MerkleAuditStore struct {
-	tree   *merkletree.MerkleTree
-	entries []MerkleAuditEntry
-}
-
-func NewMerkleAuditStore() *MerkleAuditStore {
-	return &MerkleAuditStore{
-		entries: []MerkleAuditEntry{},
-	}
-}
-
-func (a *MerkleAuditStore) Append(entry json.RawMessage) error {
-	ae := MerkleAuditEntry{Data: entry}
-	a.entries = append(a.entries, ae)
-	contents := make([]merkletree.Content, len(a.entries))
-	for i, e := range a.entries {
-		contents[i] = e
-	}
-	tree, err := merkletree.NewTree(contents)
-	if err != nil {
-		return err
-	}
-	a.tree = tree
-	return nil
-}
-
-func (a *MerkleAuditStore) GetHistory(since time.Time) ([]json.RawMessage, error) {
-	// Stub: return all for now
-	result := make([]json.RawMessage, len(a.entries))
-	for i, e := range a.entries {
-		result[i] = e.Data
-	}
-	return result, nil
-}
-
-func (a *MerkleAuditStore) VerifyIntegrity() error {
-	if a.tree == nil {
-		return nil
-	}
-	valid, err := a.tree.VerifyTree()
-	if err != nil {
-		return err
-	}
-	if !valid {
-		return fmt.Errorf("merkle tree integrity check failed")
-	}
-	return nil
-}
-
-// AuditEntry represents a single audit log entry.
-type AuditEntry struct {
-	PrevHash    string          `json:"prev_hash"`
-	PayloadHash string          `json:"payload_hash"`
-	Data        json.RawMessage `json:"data"`
-	Sig         string          `json:"sig"`
-}
-
-// FlatFileAuditStore implements AuditStore using flat files with signatures.
-type FlatFileAuditStore struct {
-	filePath   string
-	prevHash   string
-	privateKey ed25519.PrivateKey
-	publicKey  ed25519.PublicKey
-}
-
-func NewFlatFileAuditStore(filePath string, privateKey ed25519.PrivateKey, publicKey ed25519.PublicKey) *FlatFileAuditStore {
-	return &FlatFileAuditStore{
-		filePath:   filePath,
-		prevHash:   "",
-		privateKey: privateKey,
-		publicKey:  publicKey,
-	}
-}
-
-func (a *FlatFileAuditStore) Append(entry json.RawMessage) error {
-	payloadHash := sha256.Sum256(entry)
-	payloadHashStr := hex.EncodeToString(payloadHash[:])
-
-	auditEntry := AuditEntry{
-		PrevHash:    a.prevHash,
-		PayloadHash: payloadHashStr,
-		Data:        entry,
-		Sig:         "", // Will set after marshal
-	}
-
-	auditBytes, err := json.Marshal(auditEntry)
-	if err != nil {
-		return err
-	}
-
-	// Sign the marshaled entry
-	sig := ed25519.Sign(a.privateKey, auditBytes)
-	auditEntry.Sig = hex.EncodeToString(sig)
-
-	// Re-marshal with sig
-	auditBytes, err = json.Marshal(auditEntry)
-	if err != nil {
-		return err
-	}
-
-	file, err := os.OpenFile(a.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	if _, err := file.WriteString(string(auditBytes) + "\n"); err != nil {
-		return err
-	}
-
-	// Update prevHash
-	entryHash := sha256.Sum256(auditBytes)
-	a.prevHash = hex.EncodeToString(entryHash[:])
-
-	return nil
-}
-
-func (a *FlatFileAuditStore) GetHistory(since time.Time) ([]json.RawMessage, error) {
-	data, err := os.ReadFile(a.filePath)
-	if err != nil {
-		return nil, err
-	}
-	lines := strings.Split(string(data), "\n")
-	var history []json.RawMessage
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		var entry AuditEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			return nil, err
-		}
-		history = append(history, entry.Data)
-	}
-	return history, nil
-}
-
-func (a *FlatFileAuditStore) VerifyIntegrity() error {
-	data, err := os.ReadFile(a.filePath)
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(string(data), "\n")
-	expectedPrev := ""
-	for i, line := range lines {
-		if line == "" {
-			continue
-		}
-		var entry AuditEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			return fmt.Errorf("unmarshal entry %d: %v", i, err)
-		}
-		if entry.PrevHash != expectedPrev {
-			return fmt.Errorf("chain broken at entry %d", i)
-		}
-		// Verify payload hash
-		payloadHash := sha256.Sum256(entry.Data)
-		if hex.EncodeToString(payloadHash[:]) != entry.PayloadHash {
-			return fmt.Errorf("payload hash mismatch at entry %d", i)
-		}
-		// Verify signature
-		entryForSig := entry
-		entryForSig.Sig = "" // Remove sig for verification
-		entryBytes, _ := json.Marshal(entryForSig)
-		sigBytes, err := hex.DecodeString(entry.Sig)
-		if err != nil {
-			return fmt.Errorf("invalid sig hex at entry %d: %v", i, err)
-		}
-		if !ed25519.Verify(a.publicKey, entryBytes, sigBytes) {
-			return fmt.Errorf("invalid signature at entry %d", i)
-		}
-		// Update expectedPrev
-		entryBytesWithSig, _ := json.Marshal(entry)
-		entryHash := sha256.Sum256(entryBytesWithSig)
-		expectedPrev = hex.EncodeToString(entryHash[:])
-	}
-	return nil
-}
 
 // -----------------------------------------------------------------------------
 // Kernel – the immutable root of trust
@@ -556,6 +452,92 @@ func loadConfig(path string) (KernelConfig, error) {
 	return cfg, nil
 }
 
+func loadOrGenerateKeys(dataDir string) (ed25519.PrivateKey, ed25519.PublicKey, error) {
+	keysDir := filepath.Join(dataDir, "keys")
+	os.MkdirAll(keysDir, 0700)
+	privPath := filepath.Join(keysDir, "private.key")
+	pubPath := filepath.Join(keysDir, "public.key")
+
+	// Check if exist
+	if privData, err := os.ReadFile(privPath); err == nil {
+		if pubData, err := os.ReadFile(pubPath); err == nil {
+			priv := ed25519.PrivateKey(privData)
+			pub := ed25519.PublicKey(pubData)
+			if len(priv) == ed25519.PrivateKeySize && len(pub) == ed25519.PublicKeySize {
+				return priv, pub, nil
+			}
+		}
+	}
+
+	// Generate new
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Store (unencrypted for MVP)
+	if err := os.WriteFile(privPath, priv, 0600); err != nil {
+		return nil, nil, err
+	}
+	if err := os.WriteFile(pubPath, pub, 0644); err != nil {
+		return nil, nil, err
+	}
+
+	return priv, pub, nil
+}
+
+func ensureConfig(configPath string) error {
+	// Check if config exists and has AboutMe
+	if data, err := os.ReadFile(configPath); err == nil {
+		var cfg KernelConfig
+		if json.Unmarshal(data, &cfg) == nil && cfg.AboutMe.RiskTolerance != "" {
+			return nil // already configured
+		}
+	}
+
+	// Run wizard
+	fmt.Println("Welcome to AegisCourt! Let's set up your configuration.")
+	scanner := bufio.NewScanner(os.Stdin)
+
+	fmt.Print("LLM Endpoint (e.g. http://localhost:11434): ")
+	scanner.Scan()
+	endpoint := strings.TrimSpace(scanner.Text())
+	if endpoint == "" {
+		endpoint = "http://localhost:11434"
+	}
+
+	fmt.Print("Risk Tolerance (hobbyist/financial/paranoid): ")
+	scanner.Scan()
+	risk := strings.TrimSpace(scanner.Text())
+	if risk == "" {
+		risk = "hobbyist"
+	}
+
+	fmt.Print("Use Case (personal/research/production): ")
+	scanner.Scan()
+	usecase := strings.TrimSpace(scanner.Text())
+	if usecase == "" {
+		usecase = "personal"
+	}
+
+	cfg := KernelConfig{
+		DataDir:          "./aegis-data",
+		ConstitutionPath: "./docs/constitution.md",
+		LLMEndpoints:     []string{endpoint},
+		AboutMe: AboutMe{
+			RiskTolerance: risk,
+			UseCase:       usecase,
+			MaxDeferHours: 24,
+		},
+		MaxSandboxMemoryMB: 512,
+		MaxSandboxCPU:      1.0,
+		Debug:              false,
+	}
+
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	return os.WriteFile(configPath, data, 0644)
+}
+
 func loadConstitution(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -574,6 +556,7 @@ type Kernel struct {
 	courtEngine  CourtEngine // placeholder
 	auditStore   AuditStore  // placeholder
 	shutdown     chan struct{}
+	readOnly     bool
 	currentState map[string]interface{} // dummy state
 }
 
@@ -611,11 +594,10 @@ func NewKernel(configPath string) (*Kernel, error) {
 		return nil, fmt.Errorf("load constitution: %w", err)
 	}
 
-	// In real MVP: load or generate Ed25519 keypair (persist encrypted in data dir)
-	// For skeleton: generate ephemeral key (replace with secure persistence)
-	pub, priv, err := ed25519.GenerateKey(nil)
+	// Load or generate keys
+	priv, pub, err := loadOrGenerateKeys(cfg.DataDir)
 	if err != nil {
-		return nil, fmt.Errorf("generate key: %w", err)
+		return nil, fmt.Errorf("load/generate keys: %w", err)
 	}
 
 	k := &Kernel{
@@ -685,6 +667,9 @@ func (k *Kernel) ReviewProposal(ctx context.Context, desc string, diff json.RawM
 
 // SubmitProposal is the entry point for agent-proposed changes.
 func (k *Kernel) SubmitProposal(ctx context.Context, desc string, diff json.RawMessage) error {
+	if k.readOnly {
+		return fmt.Errorf("kernel in read-only mode (emergency halt)")
+	}
 	decision, err := k.ReviewProposal(ctx, desc, diff)
 	if err != nil {
 		return err
@@ -924,8 +909,10 @@ func (k *Kernel) Run(ctx context.Context) error {
 
 // EmergencyHalt immediately stops everything and enters read-only mode.
 func (k *Kernel) EmergencyHalt() {
+	k.readOnly = true
+	k.sandboxMgr.Stop()
+	log.Println("Emergency halt activated – all operations frozen")
 	close(k.shutdown)
-	// TODO: kill all sandboxes, freeze state
 }
 
 // -----------------------------------------------------------------------------
@@ -933,7 +920,8 @@ func (k *Kernel) EmergencyHalt() {
 // -----------------------------------------------------------------------------
 func main() {
 	configPath := flag.String("config", "config.json", "path to config file")
-	command := flag.String("cmd", "run", "command: run, propose, submit-proposal, emergency-halt, halt, export-audit")
+	command := flag.String("cmd", "run", "command: run, propose, submit-proposal, emergency-halt, halt, export-audit, constitution-diff")
+	proposalID := flag.String("proposal-id", "", "proposal ID for constitution-diff")
 	desc := flag.String("desc", "", "description for submit-proposal")
 	diffPath := flag.String("diff", "", "path to diff file for submit-proposal")
 	// New flags for propose
@@ -944,6 +932,11 @@ func main() {
 	withAgentLoop := flag.Bool("with-agent-loop", false, "spawn simple agent loop")
 	jsonOutputCourt := flag.Bool("json-output-court", false, "output court decision as JSON")
 	flag.Parse()
+
+	// First-run onboarding
+	if err := ensureConfig(*configPath); err != nil {
+		log.Fatalf("config setup: %v", err)
+	}
 
 	kernel, err := NewKernel(*configPath)
 	if err != nil {
@@ -1033,14 +1026,18 @@ func main() {
 					fmt.Printf("    - %s\n", c)
 				}
 			}
-			fmt.Println("  Reviewer Responses:")
+			fmt.Println("  Reviewer Board:")
+			fmt.Println("  +-------------+-------+---------------+")
+			fmt.Println("  | Persona     | Score | Recommendation|")
+			fmt.Println("  +-------------+-------+---------------+")
 			for _, r := range decision.ReviewerResponses {
-				fmt.Printf("    %s: Score %d, %s", r.Persona, r.Score, r.Recommendation)
-				if len(r.Cons) > 0 {
-					fmt.Printf(" (Concerns: %v)", r.Cons)
+				rec := r.Recommendation
+				if len(rec) > 13 {
+					rec = rec[:10] + "..."
 				}
-				fmt.Println()
+				fmt.Printf("  | %-11s | %5d | %-13s |\n", r.Persona, r.Score, rec)
 			}
+			fmt.Println("  +-------------+-------+---------------+")
 		}
 		prop := Proposal{ID: decision.ProposalID, Diff: diff, Description: *desc}
 		if *interactiveCourt {
@@ -1097,6 +1094,25 @@ func main() {
 			log.Fatalf("rollback failed: %v", err)
 		}
 		log.Println("Rollback completed")
+	case "constitution-diff":
+		if *proposalID == "" {
+			log.Fatalf("constitution-diff requires -proposal-id")
+		}
+		versionsDir := filepath.Join(kernel.config.DataDir, "versions")
+		beforePath := filepath.Join(versionsDir, "last-before.json")
+		afterPath := filepath.Join(versionsDir, *proposalID+".json")
+		beforeData, err := os.ReadFile(beforePath)
+		if err != nil {
+			log.Fatalf("read before: %v", err)
+		}
+		afterData, err := os.ReadFile(afterPath)
+		if err != nil {
+			log.Fatalf("read after: %v", err)
+		}
+		fmt.Println("Before:")
+		fmt.Println(string(beforeData))
+		fmt.Println("After:")
+		fmt.Println(string(afterData))
 	default:
 		log.Fatalf("unknown command: %s", *command)
 	}

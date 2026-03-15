@@ -37,7 +37,16 @@ func NewFlatFileAuditStore(filePath string, priv ed25519.PrivateKey, pub ed25519
 }
 
 func (a *FlatFileAuditStore) Append(entry json.RawMessage) error {
-	payloadHash := sha256.Sum256(entry)
+	// Canonicalize the JSON for consistent hashing
+	var temp interface{}
+	if err := json.Unmarshal(entry, &temp); err != nil {
+		return fmt.Errorf("unmarshal entry for hash: %w", err)
+	}
+	dataBytes, err := json.Marshal(temp)
+	if err != nil {
+		return fmt.Errorf("marshal entry for hash: %w", err)
+	}
+	payloadHash := sha256.Sum256(dataBytes)
 	payloadHashStr := hex.EncodeToString(payloadHash[:])
 
 	auditEntry := AuditEntry{
@@ -129,7 +138,12 @@ func (a *FlatFileAuditStore) VerifyIntegrity() error {
 			return fmt.Errorf("signature verification failed")
 		}
 		// Verify payload hash
-		payloadHash := sha256.Sum256(entry.Data)
+		var temp interface{}
+		if err := json.Unmarshal(entry.Data, &temp); err != nil {
+			return fmt.Errorf("unmarshal data for hash: %w", err)
+		}
+		dataBytes, _ := json.Marshal(temp)
+		payloadHash := sha256.Sum256(dataBytes)
 		if hex.EncodeToString(payloadHash[:]) != entry.PayloadHash {
 			return fmt.Errorf("payload hash mismatch")
 		}

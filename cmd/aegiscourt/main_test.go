@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -37,9 +39,23 @@ func TestKernelSignVerify(t *testing.T) {
 }
 
 func TestAuditStore(t *testing.T) {
-	store := NewMerkleAuditStore()
+	// Generate test keys
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("generate keys: %v", err)
+	}
+	
+	// Create temp file
+	tmpFile, err := os.CreateTemp("", "audit_test_*.log")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+	
+	store := NewFlatFileAuditStore(tmpFile.Name(), priv, pub)
 	entry := json.RawMessage(`{"test": "data"}`)
-	err := store.Append(entry)
+	err = store.Append(entry)
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
