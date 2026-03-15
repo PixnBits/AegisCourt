@@ -134,6 +134,13 @@ func (a *FlatFileAuditStore) GetHistory(since time.Time) ([]json.RawMessage, err
 	return history, nil
 }
 
+func (a *FlatFileAuditStore) GetMerkleRoot() []byte {
+	if a.tree == nil {
+		return nil
+	}
+	return a.tree.MerkleRoot()
+}
+
 func (a *FlatFileAuditStore) VerifyIntegrity() error {
 	data, err := os.ReadFile(a.filePath)
 	if err != nil {

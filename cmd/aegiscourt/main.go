@@ -61,6 +61,8 @@ type KernelConfig struct {
 	MaxSandboxMemoryMB  int      `json:"max_sandbox_memory_mb"`
 	MaxSandboxCPU       float64  `json:"max_sandbox_cpu"`
 	AllowedSyscalls     []string `json:"allowed_syscalls"`
+	SecondaryModel      string   `json:"secondary_model"`       // e.g. "llama2:13b"
+	CrossCheckEnabled   bool     `json:"cross_check_enabled"`
 }
 
 // AboutMe captures user risk profile (calibrates Court strictness).
@@ -133,15 +135,22 @@ type Sandbox interface {
 // ToolProxy mediates tool calls from agents to external APIs.
 type ToolProxy interface {
 	AllowAndProxy(toolCall map[string]interface{}) (string, error)
+	ProxyHTTP(ctx context.Context, reqURL string, method string, headers map[string]string, body []byte) (response []byte, err error)
+	ProxyFileRead(path string) ([]byte, error)
+	ProxyFileWrite(path string, data []byte) error
 }
 
 // ToolProxyImpl implements ToolProxy with safe API calls.
 type ToolProxyImpl struct {
-	client *http.Client
+	client     *http.Client
+	sandboxDir string
 }
 
-func NewToolProxy() *ToolProxyImpl {
-	return &ToolProxyImpl{client: &http.Client{Timeout: 10 * time.Second}}
+func NewToolProxy(sandboxDir string) *ToolProxyImpl {
+	return &ToolProxyImpl{
+		client:     &http.Client{Timeout: 10 * time.Second},
+		sandboxDir: sandboxDir,
+	}
 }
 
 func (t *ToolProxyImpl) AllowAndProxy(toolCall map[string]interface{}) (string, error) {
@@ -170,8 +179,15 @@ func (t *ToolProxyImpl) AllowAndProxy(toolCall map[string]interface{}) (string, 
 	return "", fmt.Errorf("tool not allowed: %s", tool)
 }
 
-func (t *ToolProxyImpl) ProxyHTTP(ctx context.Context, url string, method string, headers map[string]string, body []byte) (response []byte, err error) {
-	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
+func (t *ToolProxyImpl) ProxyHTTP(ctx context.Context, reqURL string, method string, headers map[string]string, body []byte) (response []byte, err error) {
+	parsed, err := url.Parse(reqURL)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("only HTTP/HTTPS schemes allowed")
+	}
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -187,13 +203,27 @@ func (t *ToolProxyImpl) ProxyHTTP(ctx context.Context, url string, method string
 }
 
 func (t *ToolProxyImpl) ProxyFileRead(path string) ([]byte, error) {
-	// For MVP: deny all file operations
-	return nil, fmt.Errorf("file read not allowed")
+	if !strings.HasPrefix(path, t.sandboxDir) {
+		return nil, fmt.Errorf("access denied: path outside sandbox")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > 10*1024*1024 { // 10MB limit
+		return nil, fmt.Errorf("file too large: %d bytes", info.Size())
+	}
+	return os.ReadFile(path)
 }
 
 func (t *ToolProxyImpl) ProxyFileWrite(path string, data []byte) error {
-	// For MVP: deny all file operations
-	return fmt.Errorf("file write not allowed")
+	if !strings.HasPrefix(path, t.sandboxDir) {
+		return fmt.Errorf("access denied: path outside sandbox")
+	}
+	if len(data) > 10*1024*1024 { // 10MB limit
+		return fmt.Errorf("data too large: %d bytes", len(data))
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 // CourtEngine orchestrates reviewers and aggregates decisions.
@@ -203,16 +233,20 @@ type CourtEngine interface {
 
 // CourtEngineImpl implements CourtEngine with real LLM-based reviewers.
 type CourtEngineImpl struct {
-	router      LLMRouter
-	constitution string
-	aboutMe     AboutMe
+	router            LLMRouter
+	constitution      string
+	aboutMe           AboutMe
+	secondaryModel    string
+	crossCheckEnabled bool
 }
 
-func NewCourtEngine(router LLMRouter, consti string, about AboutMe) *CourtEngineImpl {
+func NewCourtEngine(router LLMRouter, consti string, about AboutMe, secondaryModel string, crossCheckEnabled bool) *CourtEngineImpl {
 	return &CourtEngineImpl{
-		router:      router,
-		constitution: consti,
-		aboutMe:     about,
+		router:            router,
+		constitution:      consti,
+		aboutMe:           about,
+		secondaryModel:    secondaryModel,
+		crossCheckEnabled: crossCheckEnabled,
 	}
 }
 
@@ -255,11 +289,26 @@ func (e *CourtEngineImpl) ReviewProposal(ctx context.Context, prop Proposal) (Co
 
 		prompt := constitutionHeader + template + "\n\nProposal Description:\n" + prop.Description + "\n\nProposed Diff:\n" + string(prop.Diff) + "\n\nOutput ONLY valid JSON matching the format shown at the bottom of the template."
 
-		response, err := e.router.Dispatch(ctx, prompt, "llama3.2")
-		if err != nil {
-			log.Printf("LLM dispatch failed for %s: %v", persona, err)
-			responses = append(responses, ReviewerResponse{Persona: persona, Score: 50, Recommendation: "Defer"})
-			continue
+		var response string
+		if e.crossCheckEnabled && e.secondaryModel != "" {
+			resp1, _, sim, err := e.router.DispatchWithCrossCheck(ctx, prompt, "llama3.2", e.secondaryModel)
+			if err != nil {
+				log.Printf("LLM dispatch failed for %s: %v", persona, err)
+				responses = append(responses, ReviewerResponse{Persona: persona, Score: 50, Recommendation: "Defer"})
+				continue
+			}
+			response = resp1
+			if sim < 0.5 {
+				log.Printf("Warning: Low cross-check similarity (%.2f) for %s reviewer", sim, persona)
+			}
+		} else {
+			var err error
+			response, err = e.router.Dispatch(ctx, prompt, "llama3.2")
+			if err != nil {
+				log.Printf("LLM dispatch failed for %s: %v", persona, err)
+				responses = append(responses, ReviewerResponse{Persona: persona, Score: 50, Recommendation: "Defer"})
+				continue
+			}
 		}
 
 		var resp ReviewerResponse
@@ -328,6 +377,7 @@ type AuditStore interface {
 	Append(entry json.RawMessage) error
 	GetHistory(since time.Time) ([]json.RawMessage, error)
 	VerifyIntegrity() error
+	GetMerkleRoot() []byte
 }
 
 // GvisorSandbox implements Sandbox using Docker with gVisor runtime.
@@ -472,7 +522,7 @@ func NewSandbox(config *KernelConfig) Sandbox {
 // LLMRouter handles routing to LLM endpoints with safety checks.
 type LLMRouter interface {
 	Dispatch(ctx context.Context, prompt string, model string) (string, error)
-	DispatchWithCrossCheck(ctx context.Context, prompt string, model string, secondModel string) (string, error)
+	DispatchWithCrossCheck(ctx context.Context, prompt string, model string, secondModel string) (string, string, float64, error)
 }
 
 // LLMRouterImpl implements LLMRouter with HTTP client to various LLM endpoints.
@@ -626,22 +676,44 @@ func (r *LLMRouterImpl) tryEndpoint(ctx context.Context, endpoint string, reqBod
 	return "", fmt.Errorf("unknown format")
 }
 
-func (r *LLMRouterImpl) DispatchWithCrossCheck(ctx context.Context, prompt string, model string, secondModel string) (string, error) {
+func (r *LLMRouterImpl) DispatchWithCrossCheck(ctx context.Context, prompt string, model string, secondModel string) (string, string, float64, error) {
 	// Dispatch to primary model
 	response1, err := r.Dispatch(ctx, prompt, model)
 	if err != nil {
-		return "", err
+		return "", "", 0, err
 	}
 	// For cross-check, dispatch to second model
 	response2, err := r.Dispatch(ctx, prompt, secondModel)
 	if err != nil {
 		log.Printf("Cross-check failed: %v", err)
-		return response1, nil // Return primary if second fails
+		return response1, "", 0, nil // Return primary if second fails
 	}
-	// For MVP, just log both responses; actual cross-check logic in court
-	log.Printf("Cross-check: Primary (%s): %s", model, response1[:min(100, len(response1))])
-	log.Printf("Cross-check: Secondary (%s): %s", secondModel, response2[:min(100, len(response2))])
-	return response1, nil
+	// Calculate similarity (simple ratio of common words)
+	similarity := r.calculateSimilarity(response1, response2)
+	log.Printf("Cross-check similarity: %.2f", similarity)
+	return response1, response2, similarity, nil
+}
+
+func (r *LLMRouterImpl) calculateSimilarity(s1, s2 string) float64 {
+	// Simple word-based similarity
+	words1 := strings.Fields(strings.ToLower(s1))
+	words2 := strings.Fields(strings.ToLower(s2))
+	if len(words1) == 0 && len(words2) == 0 {
+		return 1.0
+	}
+	if len(words1) == 0 || len(words2) == 0 {
+		return 0.0
+	}
+	common := 0
+	for _, w1 := range words1 {
+		for _, w2 := range words2 {
+			if w1 == w2 {
+				common++
+				break
+			}
+		}
+	}
+	return float64(common) / float64(len(words1)+len(words2)-common)
 }
 
 func min(a, b int) int {
@@ -900,9 +972,13 @@ func NewKernel(configPath string) (*Kernel, error) {
 	// Initialize components
 	k.sandboxMgr = NewSandbox(&cfg)
 	k.llmRouter = NewLLMRouter(cfg.LLMEndpoints)
-	k.courtEngine = NewCourtEngine(k.llmRouter, consti, cfg.AboutMe)
+	k.courtEngine = NewCourtEngine(k.llmRouter, consti, cfg.AboutMe, cfg.SecondaryModel, cfg.CrossCheckEnabled)
 	k.auditStore = NewFlatFileAuditStore(filepath.Join(cfg.DataDir, "audit.log"), priv, pub)
-	k.toolProxy = NewToolProxy()
+	sandboxDir := filepath.Join(cfg.DataDir, "sandbox")
+	if err := os.MkdirAll(sandboxDir, 0700); err != nil {
+		return nil, fmt.Errorf("create sandbox dir: %w", err)
+	}
+	k.toolProxy = NewToolProxy(sandboxDir)
 
 	return k, nil
 }
@@ -1150,20 +1226,11 @@ func (k *Kernel) SubmitProposal(ctx context.Context, desc string, diff json.RawM
 }
 
 // ApplyApproved applies the approved proposal.
+// ApplyApproved applies the approved proposal.
 func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
 	// Auto-backup current state
 	versionsDir := filepath.Join(k.config.DataDir, "versions")
 	os.MkdirAll(versionsDir, 0700)
-
-	// Save last-before
-	lastBeforePath := filepath.Join(versionsDir, "last-before.json")
-	if strings.Contains(string(prop.Diff), "constitution") {
-		currentJSON, _ := json.Marshal(map[string]interface{}{"content": k.constitution})
-		os.WriteFile(lastBeforePath, currentJSON, 0600)
-	} else {
-		currentJSON, _ := json.Marshal(k.config)
-		os.WriteFile(lastBeforePath, currentJSON, 0600)
-	}
 
 	// Record last applied ID
 	lastAppliedPath := filepath.Join(versionsDir, "last-applied.txt")
@@ -1198,10 +1265,18 @@ func (k *Kernel) ApplyApproved(decision CourtDecision, prop Proposal) error {
 		return fmt.Errorf("patch apply failed: %w", err)
 	}
 
-	// Backup current
+	// Save reverse diff as backup (for MVP, save original diff)
 	backupPath := filepath.Join(k.config.DataDir, "versions", prop.ID+".json")
 	os.MkdirAll(filepath.Dir(backupPath), 0700)
-	if err := os.WriteFile(backupPath, currentJSON, 0600); err != nil {
+	// reversePatch, err := jsonpatch.CreatePatch(modified, currentJSON)
+	// if err != nil {
+	// 	return fmt.Errorf("create reverse patch: %w", err)
+	// }
+	// reverseBytes, err := json.Marshal(reversePatch)
+	// if err != nil {
+	// 	return err
+	// }
+	if err := os.WriteFile(backupPath, prop.Diff, 0600); err != nil {
 		return err
 	}
 
@@ -1341,7 +1416,7 @@ func InteractiveCourtReview(kernel *Kernel, decision CourtDecision, prop Proposa
 	return "defer", nil // default
 }
 
-// Rollback reverts to a previous state.
+// Rollback reverts to a previous state using diff.
 func (k *Kernel) Rollback(proposalID string) error {
 	versionsDir := filepath.Join(k.config.DataDir, "versions")
 	backupPath := filepath.Join(versionsDir, proposalID+".json")
@@ -1350,36 +1425,60 @@ func (k *Kernel) Rollback(proposalID string) error {
 		return err
 	}
 
+	// The backup is the reverse diff
+	var reversePatch jsonpatch.Patch
+	if err := json.Unmarshal(data, &reversePatch); err != nil {
+		return fmt.Errorf("unmarshal reverse patch: %w", err)
+	}
+
 	// Determine target
 	var targetFile string
+	var currentJSON []byte
 	var inMemory *string
-	if strings.Contains(string(data), "constitution") {
+	if strings.Contains(string(data), "constitution") || proposalID == "constitution" { // heuristic
 		targetFile = filepath.Join(k.config.DataDir, "constitution.json")
+		currentJSON, _ = json.Marshal(map[string]interface{}{"content": k.constitution})
 		inMemory = &k.constitution
 	} else {
 		targetFile = filepath.Join(k.config.DataDir, "config.json")
-		// For config, reload
+		currentJSON, _ = json.Marshal(k.config)
 	}
 
-	if err := os.WriteFile(targetFile, data, 0600); err != nil {
+	// Apply reverse patch
+	restored, err := reversePatch.Apply(currentJSON)
+	if err != nil {
+		return fmt.Errorf("apply reverse patch: %w", err)
+	}
+
+	if err := os.WriteFile(targetFile, restored, 0600); err != nil {
 		return err
 	}
 
 	// Update in-memory
 	if inMemory != nil {
-		var restored map[string]interface{}
-		json.Unmarshal(data, &restored)
-		if content, ok := restored["content"].(string); ok {
+		var restoredMap map[string]interface{}
+		json.Unmarshal(restored, &restoredMap)
+		if content, ok := restoredMap["content"].(string); ok {
 			*inMemory = content
 		}
 	}
 
-	log.Printf("Rolled back proposal %s", proposalID)
+	log.Printf("Rolled back proposal %s using diff", proposalID)
+
+	// Persist Merkle root
+	if k.auditStore != nil {
+		root := k.auditStore.GetMerkleRoot()
+		if root != nil {
+			rootPath := filepath.Join(k.config.DataDir, "merkle_root.txt")
+			os.WriteFile(rootPath, []byte(hex.EncodeToString(root)), 0600)
+		}
+	}
 
 	// Audit the rollback
 	rollbackEntry := map[string]interface{}{
 		"type":        "rollback",
 		"proposal_id": proposalID,
+		"diff_applied": string(data),
 	}
 	rollbackBytes, _ := json.Marshal(rollbackEntry)
 	return k.auditStore.Append(rollbackBytes)
