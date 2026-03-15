@@ -45,14 +45,7 @@ OpenClaw demonstrated powerful autonomous agents but suffered from severe securi
 - Threat Model Summary: Primary threats = prompt injection, sandbox escape, memory poisoning, supply-chain LLM backdoors, rogue self-modification. Mitigations are baked into every layer.
 
 #### 5.2 Key User Stories
-US-001: As Alex Rivera, I complete first-run setup (LLM selection + About Me) in <5 min.  
-Acceptance: Ollama/local or cloud selection with supply-chain guidance; profile saved and used to calibrate Court thresholds.  
-
-US-002: As any user, every proposed self-mod triggers Governance Court in <45 sec.  
-Acceptance: Simulated reviewers, pros/cons, Q&A, NASA board, deferral path, immutable log entry.  
-
-US-003: As hobbyist, I can safely add a new tool/skill that is isolated and reversible.  
-Acceptance: Court approval required; sandboxed execution; one-click rollback if issues detected.
+See [./docs/user-stories](./docs/user-stories).
 
 #### 5.3 First-Run Onboarding Flow
 1. Binary/Docker launch → “Welcome to AegisCourt – paranoid mode always on.”  
