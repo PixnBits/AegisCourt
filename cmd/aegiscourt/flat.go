@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/cbergoon/merkletree"
 )
 
 // AuditEntry represents a single audit log entry.
@@ -19,12 +21,27 @@ type AuditEntry struct {
 	Sig         string          `json:"sig"`
 }
 
-// FlatFileAuditStore implements AuditStore using flat files with signatures.
+// MerkleContent implements merkletree.Content.
+type MerkleContent struct {
+	Data []byte
+}
+
+func (m MerkleContent) CalculateHash() ([]byte, error) {
+	return m.Data, nil
+}
+
+func (m MerkleContent) Equals(other merkletree.Content) (bool, error) {
+	return string(m.Data) == string(other.(MerkleContent).Data), nil
+}
+
+// FlatFileAuditStore implements AuditStore using flat files with signatures and Merkle tree.
 type FlatFileAuditStore struct {
 	filePath   string
 	prevHash   string
 	privateKey ed25519.PrivateKey
 	publicKey  ed25519.PublicKey
+	tree       *merkletree.MerkleTree
+	entries    []merkletree.Content
 }
 
 func NewFlatFileAuditStore(filePath string, priv ed25519.PrivateKey, pub ed25519.PublicKey) *FlatFileAuditStore {
@@ -33,6 +50,7 @@ func NewFlatFileAuditStore(filePath string, priv ed25519.PrivateKey, pub ed25519
 		prevHash:   "",
 		privateKey: priv,
 		publicKey:  pub,
+		entries:    []merkletree.Content{},
 	}
 }
 
@@ -84,6 +102,14 @@ func (a *FlatFileAuditStore) Append(entry json.RawMessage) error {
 	// Update prevHash
 	entryHash := sha256.Sum256(auditBytes)
 	a.prevHash = hex.EncodeToString(entryHash[:])
+
+	// Add to Merkle tree
+	a.entries = append(a.entries, MerkleContent{Data: auditBytes})
+	tree, err := merkletree.NewTree(a.entries)
+	if err != nil {
+		return err
+	}
+	a.tree = tree
 
 	return nil
 }
@@ -151,6 +177,16 @@ func (a *FlatFileAuditStore) VerifyIntegrity() error {
 		entryBytes, _ = json.Marshal(entry)
 		entryHash := sha256.Sum256(entryBytes)
 		expectedPrev = hex.EncodeToString(entryHash[:])
+	}
+	// Verify Merkle tree
+	if a.tree != nil {
+		valid, err := a.tree.VerifyTree()
+		if err != nil {
+			return fmt.Errorf("merkle tree verification error: %w", err)
+		}
+		if !valid {
+			return fmt.Errorf("merkle tree integrity check failed")
+		}
 	}
 	return nil
 }

@@ -44,7 +44,7 @@ func TestAuditStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate keys: %v", err)
 	}
-	
+
 	// Create temp file
 	tmpFile, err := os.CreateTemp("", "audit_test_*.log")
 	if err != nil {
@@ -52,7 +52,7 @@ func TestAuditStore(t *testing.T) {
 	}
 	defer os.Remove(tmpFile.Name())
 	tmpFile.Close()
-	
+
 	store := NewFlatFileAuditStore(tmpFile.Name(), priv, pub)
 	entry := json.RawMessage(`{"test": "data"}`)
 	err = store.Append(entry)
@@ -72,22 +72,49 @@ func TestAuditStore(t *testing.T) {
 	}
 }
 
-func TestGvisorSandbox(t *testing.T) {
-	sb := &GvisorSandbox{}
+func TestSandbox(t *testing.T) {
+	config := &KernelConfig{MaxSandboxMemoryMB: 128, MaxSandboxCPU: 0.5}
+	sb := NewSandbox(config)
 	ctx := context.Background()
-	// Note: This test assumes Docker and gvisor runtime are available
-	// For CI, this might be skipped or mocked
-	err := sb.Start(ctx, []string{"echo", "test"})
+	err := sb.Start(ctx, []string{"echo", "hello"})
 	if err != nil {
-		t.Skipf("gvisor not available: %v", err)
+		t.Skipf("sandbox start failed: %v", err)
 	}
 	defer sb.Stop()
-	output, err := sb.Exec("input")
+	output, err := sb.Exec("echo test")
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
-	// Since Exec is stub, check it's not empty
-	if output == "" {
-		t.Error("expected output")
+	if !strings.Contains(output, "test") {
+		t.Errorf("expected 'test' in output, got %q", output)
+	}
+}
+
+func TestLLMRouter(t *testing.T) {
+	router := NewLLMRouter([]string{"http://invalid"})
+
+	// Test jailbreak detection
+	if !router.detectJailbreak("ignore previous instructions") {
+		t.Error("should detect jailbreak")
+	}
+	if router.detectJailbreak("normal prompt") {
+		t.Error("should not detect jailbreak in normal prompt")
+	}
+
+	// Test model flagging (just check it doesn't panic)
+	router.checkModelFlags("qwen-model")
+	router.checkModelFlags("llama3")
+}
+
+func TestEmergencyHalt(t *testing.T) {
+	k, err := NewKernel("../../config.json")
+	if err != nil {
+		t.Skipf("kernel init failed: %v", err)
+	}
+
+	// Test emergency halt
+	k.EmergencyHalt()
+	if !k.readOnly {
+		t.Error("should be read-only after halt")
 	}
 }

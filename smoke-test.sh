@@ -1,6 +1,24 @@
 #!/bin/bash
 
 # Smoke test script for AegisCourt MVP
+# Supports Linux, macOS, Windows (WSL)
+
+OS=$(uname -s)
+case "$OS" in
+    Linux)
+        echo "Running on Linux - full sandbox support expected"
+        ;;
+    Darwin)
+        echo "Running on macOS - seccomp-bpf isolation only"
+        ;;
+    CYGWIN*|MINGW*|MSYS*)
+        echo "Running on Windows (WSL) - assuming WSL2 with Docker"
+        ;;
+    *)
+        echo "Unsupported OS: $OS"
+        exit 1
+        ;;
+esac
 
 echo "Starting AegisCourt kernel in background..."
 ./aegiscourt -cmd run &

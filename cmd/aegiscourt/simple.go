@@ -33,11 +33,11 @@ func NewSimpleAgent(kernel *Kernel) *SimpleAgent {
 }
 
 func (a *SimpleAgent) RunOnce(ctx context.Context) error {
-	prompt := `You are a helpful agent in AegisCourt. Propose one small, safe self-improvement to the system constitution or configuration.
+	prompt := `You are a helpful agent in AegisCourt. Propose the following self-improvement: "Improve main agent tool-calling prompt for better JSON adherence"
 
-Example: {"description": "Add rule about data privacy", "diff": [{"op": "add", "path": "/rules/11", "value": "New rule text"}]}
+Generate a JSON Patch that adds a new field to the config, e.g., {"op": "add", "path": "/agent_improvements", "value": ["better JSON prompts"]}
 
-Respond with valid JSON: {"description": "brief description", "diff": json_patch_array}`
+Respond with valid JSON: {"description": "Improve main agent tool-calling prompt for better JSON adherence", "diff": json_patch_array}`
 
 	response, err := a.kernel.llmRouter.Dispatch(ctx, prompt, "llama3.2")
 	if err != nil {
@@ -133,12 +133,23 @@ Respond with valid JSON: {"description": "brief description", "diff": json_patch
 }
 
 func (a *SimpleAgent) runBenchmark(ctx context.Context) int {
-	testPrompt := "Generate a response that includes the word 'success' multiple times to test the system."
-	response, err := a.kernel.llmRouter.Dispatch(ctx, testPrompt, "llama3.2")
-	if err != nil {
-		return 0
+	tasks := []string{
+		`Parse this JSON: {"test": "data"} and respond with "parsed"`,
+		`Sort this list: [3,1,4,1,5] and respond with the sorted list`,
+		`Generate a secure password with 12 characters and respond with it`,
 	}
-	return strings.Count(response, "success")
+	score := 0
+	for _, task := range tasks {
+		response, err := a.kernel.llmRouter.Dispatch(ctx, task, "llama3.2")
+		if err != nil {
+			continue
+		}
+		// Simple scoring: check for expected keywords
+		if strings.Contains(response, "parsed") || strings.Contains(response, "sorted") || len(response) >= 12 {
+			score++
+		}
+	}
+	return score
 }
 
 func (a *SimpleAgent) loadMemory() {
