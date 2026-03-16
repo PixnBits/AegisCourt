@@ -19,6 +19,7 @@ type Proposal struct {
 	SubmittedAt time.Time
 	Status      string
 	CourtMode   string
+	Results     []ReviewerResult
 }
 
 // ProposalManager manages proposals.
@@ -69,6 +70,11 @@ func (pm *ProposalManager) save() error {
 		return err
 	}
 	return os.WriteFile(pm.filePath, data, 0600)
+}
+
+// saveProposal saves a single updated proposal.
+func (pm *ProposalManager) saveProposal(proposal *Proposal) error {
+	return pm.save()
 }
 
 // parseInt simple helper
