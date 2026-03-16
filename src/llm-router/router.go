@@ -15,9 +15,13 @@ type Router struct {
 }
 
 // NewRouter creates a new router with default providers.
-func NewRouter(endpoint, model string) *Router {
-	// For MVP, use Ollama as primary
-	primary := &OllamaProvider{endpoint: endpoint, model: model}
+func NewRouter(provider, endpoint, model, apiKey string) *Router {
+	var primary LLMProvider
+	if provider == "openai" {
+		primary = &OpenAIProvider{apiKey: apiKey, model: model}
+	} else {
+		primary = &OllamaProvider{endpoint: endpoint, model: model}
+	}
 	personaProviders := map[string]LLMProvider{
 		"default": primary,
 		// Add more later

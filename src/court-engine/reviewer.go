@@ -33,7 +33,7 @@ type CourtEngine struct {
 func NewCourtEngine(dataDir string) *CourtEngine {
 	return &CourtEngine{
 		ProposalMgr: NewProposalManager(dataDir),
-		LLMRouter:   llmrouter.NewRouter("http://127.0.0.1:11434", "nemotron-3-nano"),
+		LLMRouter:   llmrouter.NewRouter("ollama", "http://127.0.0.1:11434", "nemotron-3-nano", ""),
 		Personas:    []string{"CISO", "MRM", "Compliance & Regulatory", "Responsible AI", "SRE", "Helpfulness & Evolution"},
 	}
 }

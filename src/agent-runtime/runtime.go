@@ -20,11 +20,11 @@ type AgentRuntime struct {
 }
 
 // NewAgentRuntime creates a new agent runtime.
-func NewAgentRuntime(llmEndpoint, llmModel string, audit *auditstore.AuditStore) *AgentRuntime {
+func NewAgentRuntime(provider, llmEndpoint, llmModel, apiKey string, audit *auditstore.AuditStore) *AgentRuntime {
 	return &AgentRuntime{
 		SandboxMgr:  sandbox.NewSandboxManager(),
 		Mediator:    kernel.NewMediator(),
-		LLM:         llmrouter.NewRouter(llmEndpoint, llmModel),
+		LLM:         llmrouter.NewRouter(provider, llmEndpoint, llmModel, apiKey),
 		Audit:       audit,
 		llmEndpoint: llmEndpoint,
 		llmModel:    llmModel,
