@@ -30,9 +30,9 @@ type CourtEngine struct {
 }
 
 // NewCourtEngine creates a new court engine.
-func NewCourtEngine() *CourtEngine {
+func NewCourtEngine(dataDir string) *CourtEngine {
 	return &CourtEngine{
-		ProposalMgr: NewProposalManager(),
+		ProposalMgr: NewProposalManager(dataDir),
 		LLMRouter:   llmrouter.NewRouter("http://127.0.0.1:11434", "nemotron-3-nano"),
 		Personas:    []string{"CISO", "MRM", "Compliance & Regulatory", "Responsible AI", "SRE", "Helpfulness & Evolution"},
 	}

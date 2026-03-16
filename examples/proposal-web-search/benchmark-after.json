@@ -1,0 +1,5 @@
+{
+  "task": "search for current weather",
+  "success_rate": 0.8,
+  "reason": "web search tool enabled"
+}

@@ -19,6 +19,8 @@ type AuditEntry struct {
 	Payload     []byte             `json:"payload"` // JSON of event
 	Signature   []byte             `json:"signature"`
 	MerkleProof []crypto.ProofItem `json:"merkle_proof"`
+	Type        string             `json:"type"`
+	RootHash    []byte             `json:"root_hash"`
 }
 
 // AuditLog manages an append-only audit log using Merkle tree.
@@ -67,11 +69,13 @@ func (al *AuditLog) Append(eventType string, payload interface{}) error {
 		PrevHash:  al.merkleTree.GetRoot(),
 		Payload:   payloadBytes,
 		Signature: signature,
+		Type:      eventType,
 	}
 
 	// Append to Merkle tree
 	al.merkleTree.Append(entryBytes)
 	entry.MerkleProof, _ = al.merkleTree.GetProof(len(al.entries))
+	entry.RootHash = al.merkleTree.GetRoot()
 
 	al.entries = append(al.entries, entry)
 
@@ -98,18 +102,24 @@ func (al *AuditLog) VerifyEntry(id string) (bool, error) {
 		return false, fmt.Errorf("entry not found")
 	}
 
-	// Verify signature
+	// Reconstruct payload
+	var payload interface{}
+	json.Unmarshal(entry.Payload, &payload)
+
+	// Reconstruct entryData for verification
 	entryData := map[string]interface{}{
-		"type":    "unknown", // TODO: store type in entry
-		"payload": entry.Payload,
+		"type":    entry.Type,
+		"payload": payload,
 	}
 	entryBytes, _ := json.Marshal(entryData)
+
+	// Verify signature
 	if !ed25519.Verify(al.pubKey, entryBytes, entry.Signature) {
 		return false, nil
 	}
 
 	// Verify Merkle proof
-	return crypto.VerifyProof(crypto.Hash(entryBytes), entry.MerkleProof, al.GetRootHash()), nil
+	return crypto.VerifyProof(crypto.Hash(entryBytes), entry.MerkleProof, entry.RootHash), nil
 }
 
 // ExportJSONL exports the log to a JSONL file.

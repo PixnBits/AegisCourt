@@ -5,7 +5,7 @@ import (
 )
 
 func TestProposalManager(t *testing.T) {
-	pm := NewProposalManager()
+	pm := NewProposalManager("/tmp")
 
 	// Submit a proposal
 	proposal := Proposal{

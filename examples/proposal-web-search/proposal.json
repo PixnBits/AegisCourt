@@ -1,0 +1,18 @@
+{
+  "id": "web-search-001",
+  "type": "add-tool",
+  "name": "web_search_tool",
+  "description": "Add a web search tool for agents to query the internet safely",
+  "diff": {
+    "op": "add",
+    "path": "/tools/web_search",
+    "value": {
+      "command": "curl",
+      "args": ["-s", "https://api.duckduckgo.com/?q={query}&format=json"],
+      "mediation": "network"
+    }
+  },
+  "submitted_at": "2026-03-15T22:00:00Z",
+  "status": "pending",
+  "court_mode": "auto"
+}

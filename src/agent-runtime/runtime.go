@@ -34,19 +34,25 @@ func NewAgentRuntime(llmEndpoint, llmModel string, audit *auditstore.AuditStore)
 // RunOneShot runs a one-shot agent task.
 func (r *AgentRuntime) RunOneShot(task string) (string, error) {
 	// Log start
-	r.Audit.LogEvent("agent_run_start", map[string]string{"task": task})
+	if r.Audit != nil {
+		r.Audit.LogEvent("agent_run_start", map[string]string{"task": task})
+	}
 
 	response, err := r.LLM.CallPersona("default", task)
 	if err != nil {
-		r.Audit.LogEvent("agent_run_error", map[string]string{"error": err.Error()})
+		if r.Audit != nil {
+			r.Audit.LogEvent("agent_run_error", map[string]string{"error": err.Error()})
+		}
 		return "", err
 	}
 
 	// Log success
-	r.Audit.LogEvent("agent_run_success", map[string]interface{}{
-		"task":     task,
-		"response": response,
-	})
+	if r.Audit != nil {
+		r.Audit.LogEvent("agent_run_success", map[string]interface{}{
+			"task":     task,
+			"response": response,
+		})
+	}
 
 	// TODO: spawn sandbox, mediate I/O, timeout
 	return response, nil

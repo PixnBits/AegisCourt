@@ -17,16 +17,20 @@ type Mutation struct {
 // ApplyMutation applies a mutation to the agent.
 func (r *AgentRuntime) ApplyMutation(m Mutation) error {
 	// Log before
-	r.Audit.LogEvent("mutation_start", map[string]interface{}{
-		"id":        m.ID,
-		"diff_type": m.DiffType,
-		"target":    m.Target,
-	})
+	if r.Audit != nil {
+		r.Audit.LogEvent("mutation_start", map[string]interface{}{
+			"id":        m.ID,
+			"diff_type": m.DiffType,
+			"target":    m.Target,
+		})
+	}
 
 	// Validate against constitution (stub)
 	allowed, reason := r.Mediator.AllowIO("mutation", m.Target)
 	if !allowed {
-		r.Audit.LogEvent("mutation_denied", map[string]string{"reason": reason})
+		if r.Audit != nil {
+			r.Audit.LogEvent("mutation_denied", map[string]string{"reason": reason})
+		}
 		return fmt.Errorf("mutation denied: %s", reason)
 	}
 
@@ -43,11 +47,13 @@ func (r *AgentRuntime) ApplyMutation(m Mutation) error {
 	}
 
 	// Log after
-	r.Audit.LogEvent("mutation_applied", map[string]interface{}{
-		"id":        m.ID,
-		"diff_type": m.DiffType,
-		"target":    m.Target,
-	})
+	if r.Audit != nil {
+		r.Audit.LogEvent("mutation_applied", map[string]interface{}{
+			"id":        m.ID,
+			"diff_type": m.DiffType,
+			"target":    m.Target,
+		})
+	}
 
 	return nil
 }

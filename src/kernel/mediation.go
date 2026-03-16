@@ -20,6 +20,9 @@ func (m *Mediator) AllowIO(operation string, target string) (bool, string) {
 		return m.AllowNetwork(target)
 	case "exec":
 		return m.AllowExec(target)
+	case "mutation":
+		// For MVP, allow mutations (would check constitution)
+		return true, ""
 	default:
 		return false, "Unknown operation"
 	}

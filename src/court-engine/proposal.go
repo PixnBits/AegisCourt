@@ -1,8 +1,11 @@
 package courtengine
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -22,14 +25,57 @@ type Proposal struct {
 type ProposalManager struct {
 	proposals map[string]*Proposal
 	nextID    int
+	filePath  string
 }
 
 // NewProposalManager creates a new proposal manager.
-func NewProposalManager() *ProposalManager {
-	return &ProposalManager{
+func NewProposalManager(dataDir string) *ProposalManager {
+	filePath := filepath.Join(dataDir, "proposals.json")
+	pm := &ProposalManager{
 		proposals: make(map[string]*Proposal),
 		nextID:    1,
+		filePath:  filePath,
 	}
+	pm.load()
+	return pm
+}
+
+// load loads proposals from file.
+func (pm *ProposalManager) load() {
+	data, err := os.ReadFile(pm.filePath)
+	if err != nil {
+		return // no file yet
+	}
+	var proposals []Proposal
+	if err := json.Unmarshal(data, &proposals); err != nil {
+		return
+	}
+	for _, p := range proposals {
+		pm.proposals[p.ID] = &p
+		if id := fmt.Sprintf("%d", pm.nextID); p.ID >= id {
+			pm.nextID = parseInt(p.ID) + 1
+		}
+	}
+}
+
+// save saves proposals to file.
+func (pm *ProposalManager) save() error {
+	var proposals []Proposal
+	for _, p := range pm.proposals {
+		proposals = append(proposals, *p)
+	}
+	data, err := json.MarshalIndent(proposals, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(pm.filePath, data, 0600)
+}
+
+// parseInt simple helper
+func parseInt(s string) int {
+	var n int
+	fmt.Sscanf(s, "%d", &n)
+	return n
 }
 
 // Submit submits a new proposal.
@@ -58,6 +104,7 @@ func (pm *ProposalManager) Submit(proposal Proposal) (string, error) {
 	pm.proposals[id] = &proposal
 
 	// TODO: log to audit
+	pm.save()
 
 	return id, nil
 }

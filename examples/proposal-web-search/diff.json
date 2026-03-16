@@ -1,0 +1,11 @@
+[
+  {
+    "op": "add",
+    "path": "/tools/web_search",
+    "value": {
+      "command": "curl",
+      "args": ["-s", "https://api.duckduckgo.com/?q={query}&format=json"],
+      "mediation": "network"
+    }
+  }
+]

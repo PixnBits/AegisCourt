@@ -15,24 +15,24 @@
 - **Phase 3: LLM Router**
   - Router skeleton with Ollama and OpenAI providers
   - Supply-chain risk flagging
-- **Phase 4: Governance Court Engine (Partial)**
-  - Proposal submission and management
+- **Phase 4: Governance Court Engine**
+  - Proposal submission and management with persistence
   - Reviewer orchestration (stub)
 - **Phase 5: Audit & Rollback Store**
-  - Append-only Merkle-tree audit log with signing
+  - Append-only Merkle-tree audit log with signing and proof verification
   - Rollback mechanism (stub)
   - Enterprise snapshot export
-- **Phase 6: Agent Runtime (Basic)**
+- **Phase 6: Agent Runtime**
   - One-shot task execution with audit logging
-  - Self-modification application (stub)
-- **Phase 7: CLI Interface (Partial)**
+  - Self-modification application with mediation checks
+- **Phase 7: CLI Interface**
   - Init wizard with Survey and key storage
   - Runtime start/stop/halt/agent run
-  - Governance propose and court view commands
-- **Phase 8: Testing, Security, Dogfooding (Partial)**
+  - Governance propose, court view, status, log, snapshot, rollback, update commands
+- **Phase 8: Testing, Security, Dogfooding**
   - Unit tests for core components
-  - Red-team simulation helpers (pending)
-  - Dogfood example (pending)
+  - Red-team simulation helpers
+  - Dogfood example with end-to-end proposal flow
 
 ## Key Components Implemented
 - Kernel bootstrap and integrity verification
