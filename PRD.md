@@ -1,8 +1,8 @@
 ---
 title: AegisCourt Product Requirements Document
-version: 0.3
-date: 2026-03-14
-status: Draft – Architect-reviewed
+version: 0.4
+date: 2026-03-15
+status: Draft
 ---
 
 **Lean PRD – AegisCourt: Constitutional Self-Evolving Agent Framework**
@@ -50,11 +50,33 @@ See [./docs/user-stories](./docs/user-stories).
 #### 5.3 First-Run Onboarding Flow
 1. Binary/Docker launch → “Welcome to AegisCourt – paranoid mode always on.”  
 2. LLM selector (default suggestion: nemotron-3-nano via Ollama).  
-3. About Me wizard (risk tolerance slider, use-cases, deferral prefs).  
+3. About Me wizard (risk tolerance slider, use-cases, deferral prefs, **persona/role selection that calibrates Court mode: Hobbyist Auto, Indie Assisted, Team Hybrid, Enterprise Manual**).
 4. Kernel bootstrap + cryptographic self-signature.  
-5. First test proposal (e.g., “add echo skill”) → live Governance Court demo.
+5. First test proposal (e.g., “add echo skill”) → live Governance Court demo **(mode-dependent review depth and human touchpoints)**.
 
-#### 5.4 CLI Interface (Operator-Facing)
+#### 5.4 Governance Court Modes & Human Review Requirements
+
+The Governance Court adapts its operation based on the user's selected **persona/profile** in the About Me wizard. This ensures speed for hobbyists while enforcing real human governance for enterprise use. All modes run the same reviewer personas (CISO, MRM, Compliance, Responsible AI, SRE, Helpfulness) via LLM, but differ in mandatory human intervention before final application.
+
+| Mode                  | Trigger / Persona Mapping                  | LLM Reviewers              | Mandatory Human Review                                                                 | Final Decision Flow                                                                 | Typical Use Case                     |
+|-----------------------|--------------------------------------------|----------------------------|----------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|--------------------------------------|
+| **Hobbyist Auto**     | Alex Rivera (default); low-risk-tolerance slider | Full simulated panel (or fallback to 1–2 if low RAM) | None — user sees NASA board + aggregate recommendation | User reviews summary/board → casts vote (approve/reject/defer) via CLI; auto-apply on approve | Solo hobbyist, home automation       |
+| **Indie Assisted**    | Jordan Hale; medium sliders                | Full panel, detailed JSON reports | Required — same user reads reports, may ask Q&A with reviewers | User weighs reports → explicit vote; often single person acts as "board"      | Indie dev, startup founder           |
+| **Team Hybrid**       | Sam Chen; team-oriented profile            | Full panel                 | Required — team members can be assigned domains (e.g. one handles CISO concerns) | Reports feed shared discussion; designated approvers vote per role or collectively | Mid-market team, internal workflows  |
+| **Enterprise Manual** | Dr. Lena Moreau; high-risk sliders         | Full panel as evidence only | Mandatory — different real humans sign off per reviewer type (CISO, MRM, etc.) | LLM reports become artifacts for human review board; multi-signature required before apply | Tier-1 financial, regulated org      |
+
+**Mode Selection & Calibration**
+- Chosen during onboarding wizard (with explanation of trade-offs: speed vs. assurance).
+- Adjustable post-setup via `aegiscourt config set court.mode <mode>` (triggers Court review if increasing strictness).
+- Risk sliders in About Me influence: number of reviewers, auto-apply thresholds, deferral timeouts, and whether low-impact proposals skip full panel in Hobbyist mode.
+- All modes preserve invariants: proposal → immutable log entry, reversible, user override via `halt`.
+
+**CLI Impact**
+- `court vote` always required in Assisted / Hybrid / Manual modes.
+- Hobbyist mode allows `--confirm` flag to streamline (still audited).
+- `court view` shows mode-specific instructions (“Human sign-off required for CISO domain”).
+
+#### 5.5 CLI Interface (Operator-Facing)
 The primary (and initially only) user interface is a secure, minimalist CLI. It follows Unix patterns (git/docker-like subcommands) with paranoid defaults, progressive disclosure, and full audit logging of every command that affects state.
 
 **Core Design Goals**
