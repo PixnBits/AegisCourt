@@ -45,7 +45,83 @@ OpenClaw demonstrated powerful autonomous agents but suffered from severe securi
 - Threat Model Summary: Primary threats = prompt injection, sandbox escape, memory poisoning, supply-chain LLM backdoors, rogue self-modification. Mitigations are baked into every layer.
 
 #### 5.2 Key User Stories
-See [./docs/user-stories](./docs/user-stories).
+
+##### US-001
+As Alex Rivera, I complete first-run setup (LLM selection + About Me) in <5 min.  
+
+Acceptance: Ollama/local or cloud selection with supply-chain guidance; profile saved and used to calibrate Court thresholds.  
+
+
+##### US-002
+As any user, every proposed self-mod triggers Governance Court in <45 sec.  
+
+Acceptance: Simulated reviewers, pros/cons, Q&A, NASA board, deferral path, immutable log entry.  
+
+
+##### US-003
+As hobbyist, I can safely add a new tool/skill that is isolated and reversible.  
+
+Acceptance: Court approval required; sandboxed execution; one-click rollback if issues detected.
+
+
+##### US-004
+As Jordan Hale, I can configure and switch between multiple LLM providers during setup or runtime, so that I can experiment with cost/performance trade-offs without restarting the system.  
+
+Acceptance: CLI supports `config set llm <provider>` with Court gating for high-risk models (e.g., Qwen flagged per Rule 8); supply-chain guidance shown; changes logged immutably; seamless fallback if primary LLM fails.
+
+
+##### US-005
+As Sam Chen, I can customize the "About Me" profile with team-specific risk sliders and preferences, so that the Governance Court thresholds align with our internal policies.  
+
+Acceptance: Profile includes sliders for risk tolerance, deferral timeouts, and reviewer weights; changes require lightweight Court review; profile exportable for team sharing; applies immediately to pending proposals.
+
+
+##### US-006
+As Alex Rivera, I can start and stop the agent runtime with resource limits, so that it runs safely on my home hardware without crashing my system.  
+
+Acceptance: CLI `start` with flags like `--resources ram=4GB`; enforces cgroup limits; status shows real-time usage; automatic throttling if exceeding baselines (<4 GB RAM per PRD); graceful stop preserves audit log.
+
+
+##### US-007
+As Dr. Lena Moreau, I can execute a one-shot agent task in a fully isolated sandbox, so that I can test capabilities without persistent state or risk.  
+
+Acceptance: CLI `agent run <task>` spawns ephemeral gVisor sandbox; no host I/O without approval; output sanitized; task logs to audit trail; timeout enforcement (<30 sec default).
+
+
+##### US-008
+As Jordan Hale, I can interact with the Governance Court via Q&A to clarify reviewer concerns, so that I can make informed decisions without guessing.  
+
+Acceptance: CLI `court qa <id> <question>` routes to specific/all reviewers; responses in <15 sec; Q&A logged; influences final board if new evidence provided; supports deferral for deeper analysis.
+
+
+##### US-009
+As Sam Chen, I can propose and approve a constitution amendment, so that the system evolves to match our regulatory needs over time.  
+
+Acceptance: CLI `propose amend-rule <rule-id> --diff-file <path>`; requires full Court with high threshold (supermajority); user vote mandatory; amendment reversible; aligns with Rule 10 override.
+
+
+##### US-010
+As Dr. Lena Moreau, I can export a tamper-evident audit snapshot for regulatory review, so that I can demonstrate compliance without custom tooling.  
+
+Acceptance: CLI `snapshot create --enterprise`; includes Merkle tree proofs, SBOM, regulatory mappings (e.g., NIST pillars); verifiable externally; covers all mutations and decisions; <1 min generation.
+
+
+##### US-011
+As Alex Rivera, I can view real-time status and logs to monitor ongoing proposals and runtime, so that I stay informed without constant intervention.  
+
+Acceptance: CLI `status --watch` and `log list --filter <id>`; human-readable tables; JSON option; shows pending items, resources, and alerts (e.g., high-risk deferrals); no performance impact.
+
+
+##### US-012
+As Jordan Hale, I can rollback a recent mutation if it causes issues, so that I can recover quickly without data loss.  
+
+Acceptance: CLI `rollback <id | last>`; atomic revert using signed diffs; preserves audit trail; automatic post-rollback benchmark; emergency halt integrates (per Rule 10).
+
+
+##### US-013
+As Sam Chen, I can update the kernel to a new version via the Court, so that the system stays secure and feature-current without manual intervention.  
+
+Acceptance: CLI `update --channel stable`; proposes as diff; Court evaluates risks (e.g., isolation changes); applies only on approval; fallback to previous version if failed.
 
 #### 5.3 First-Run Onboarding Flow
 1. Binary/Docker launch → “Welcome to AegisCourt – paranoid mode always on.”  
