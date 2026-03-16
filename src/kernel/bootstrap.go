@@ -13,31 +13,31 @@ import (
 // Bootstrap performs the kernel bootstrap process.
 // It generates a key pair, signs the kernel binary, stores the signature,
 // loads the constitution, and creates an initial log entry.
-func Bootstrap() (kernelHash string, err error) {
+func Bootstrap() (kernelHash string, pubKey []byte, privKey []byte, err error) {
 	// Get the kernel binary path
 	binaryPath, err := os.Executable()
 	if err != nil {
-		return "", fmt.Errorf("failed to get executable path: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to get executable path: %w", err)
 	}
 
 	// Read and hash the binary
 	binaryData, err := os.ReadFile(binaryPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read binary: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to read binary: %w", err)
 	}
 	binaryHash := crypto.Hash(binaryData)
 	kernelHash = hex.EncodeToString(binaryHash)
 
 	// Generate key pair
-	pubKey, privKey, err := crypto.GenerateKeyPair()
+	pubKey, privKey, err = crypto.GenerateKeyPair()
 	if err != nil {
-		return "", fmt.Errorf("failed to generate key pair: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to generate key pair: %w", err)
 	}
 
 	// Sign the binary hash
 	signature, err := crypto.Sign(binaryHash, privKey)
 	if err != nil {
-		return "", fmt.Errorf("failed to sign binary: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to sign binary: %w", err)
 	}
 
 	// Store signature: public key + signature
@@ -46,17 +46,17 @@ func Bootstrap() (kernelHash string, err error) {
 	sigPath := filepath.Join(configDir, "kernel.sig")
 	err = os.MkdirAll(configDir, 0700)
 	if err != nil {
-		return "", fmt.Errorf("failed to create config dir: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to create config dir: %w", err)
 	}
 	err = os.WriteFile(sigPath, sigData, 0600)
 	if err != nil {
-		return "", fmt.Errorf("failed to write signature: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to write signature: %w", err)
 	}
 
 	// Load constitution
 	constitution, err := loadConstitution()
 	if err != nil {
-		return "", fmt.Errorf("failed to load constitution: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to load constitution: %w", err)
 	}
 	_ = constitution // TODO: parse later
 
@@ -65,10 +65,10 @@ func Bootstrap() (kernelHash string, err error) {
 	logPath := filepath.Join(configDir, "bootstrap.log")
 	err = os.WriteFile(logPath, []byte(logEntry), 0600)
 	if err != nil {
-		return "", fmt.Errorf("failed to write log: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to write log: %w", err)
 	}
 
-	return kernelHash, nil
+	return kernelHash, pubKey, privKey, nil
 }
 
 // VerifyKernel checks the integrity of the kernel binary.

@@ -2,7 +2,9 @@ AegisCourt – Constitutional Self-Evolving Agent Framework
 
 ## Quick Start
 ```bash
-aegiscourt init && start && agent run "Hello"
+aegiscourt setup init
+aegiscourt runtime start
+aegiscourt runtime agent run "Hello"
 ```
 
 ## Architecture

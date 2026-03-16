@@ -23,7 +23,7 @@ func TestBootstrap(t *testing.T) {
 	}()
 
 	// Call Bootstrap
-	kernelHash, err := Bootstrap()
+	kernelHash, _, _, err := Bootstrap()
 	if err != nil {
 		t.Fatalf("Bootstrap failed: %v", err)
 	}

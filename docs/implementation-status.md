@@ -18,8 +18,21 @@
 - **Phase 4: Governance Court Engine (Partial)**
   - Proposal submission and management
   - Reviewer orchestration (stub)
-- **Phase 5-8: Pending**
-  - Audit store, agent runtime, CLI, testing
+- **Phase 5: Audit & Rollback Store**
+  - Append-only Merkle-tree audit log with signing
+  - Rollback mechanism (stub)
+  - Enterprise snapshot export
+- **Phase 6: Agent Runtime (Basic)**
+  - One-shot task execution with audit logging
+  - Self-modification application (stub)
+- **Phase 7: CLI Interface (Partial)**
+  - Init wizard with Survey and key storage
+  - Runtime start/stop/halt/agent run
+  - Governance propose and court view commands
+- **Phase 8: Testing, Security, Dogfooding (Partial)**
+  - Unit tests for core components
+  - Red-team simulation helpers (pending)
+  - Dogfood example (pending)
 
 ## Key Components Implemented
 - Kernel bootstrap and integrity verification
@@ -28,9 +41,18 @@
 - LLM routing with risk assessment
 - Proposal management
 - Basic mediation and constitution checking
+- Agent runtime for ephemeral execution
+- CLI with interactive init and runtime control
+
+## Quickstart Functional
+- `aegiscourt setup init` (interactive setup with keys)
+- `aegiscourt runtime start` (launch runtime with audit)
+- `aegiscourt runtime agent run "Hello"` (one-shot execution with logging)
+- `aegiscourt governance propose add-tool name` (submit proposal)
+- `aegiscourt governance court view id` (view proposal)
 
 ## Next Steps
-- Complete court engine with aggregation and Q&A
-- Implement audit store with rollback
-- Build CLI interface
-- Add comprehensive tests and red-team simulations
+- Implement audit store (Phase 5)
+- Add mutation engine for self-evolution (Phase 6 full)
+- Complete CLI commands (governance, observability)
+- Add tests for new components

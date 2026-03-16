@@ -15,9 +15,9 @@ type Router struct {
 }
 
 // NewRouter creates a new router with default providers.
-func NewRouter() *Router {
+func NewRouter(endpoint, model string) *Router {
 	// For MVP, use Ollama as primary
-	primary := &OllamaProvider{endpoint: "http://127.0.0.1:11434", model: "nemotron-3-nano"}
+	primary := &OllamaProvider{endpoint: endpoint, model: model}
 	personaProviders := map[string]LLMProvider{
 		"default": primary,
 		// Add more later

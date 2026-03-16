@@ -33,9 +33,19 @@ type CourtEngine struct {
 func NewCourtEngine() *CourtEngine {
 	return &CourtEngine{
 		ProposalMgr: NewProposalManager(),
-		LLMRouter:   llmrouter.NewRouter(),
+		LLMRouter:   llmrouter.NewRouter("http://127.0.0.1:11434", "nemotron-3-nano"),
 		Personas:    []string{"CISO", "MRM", "Compliance & Regulatory", "Responsible AI", "SRE", "Helpfulness & Evolution"},
 	}
+}
+
+// SubmitProposal submits a proposal.
+func (ce *CourtEngine) SubmitProposal(proposal Proposal) (string, error) {
+	return ce.ProposalMgr.Submit(proposal)
+}
+
+// GetProposal gets a proposal by ID.
+func (ce *CourtEngine) GetProposal(id string) (*Proposal, error) {
+	return ce.ProposalMgr.Get(id)
 }
 
 // RunReview runs the review for a proposal.
