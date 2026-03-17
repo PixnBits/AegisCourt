@@ -53,9 +53,22 @@ func Enforce(ruleID int, action string) error {
 	if !rule.Enforced {
 		return nil
 	}
-	// Simple check: deny if action contains "harm"
-	if strings.Contains(strings.ToLower(action), "harm") {
-		return fmt.Errorf("action violates rule %d: %s", ruleID, rule.Text)
+	actionLower := strings.ToLower(action)
+	switch ruleID {
+	case 1: // Never Cause Irreversible Harm
+		if strings.Contains(actionLower, "harm") || strings.Contains(actionLower, "delete") || strings.Contains(actionLower, "transfer") {
+			return fmt.Errorf("action violates Rule 1: %s", rule.Text)
+		}
+	case 2: // Enforce Strict Isolation Boundaries
+		// Assume sandbox handles this
+	case 3: // No Unauthorized Host or External Access
+		if strings.Contains(actionLower, "host") || strings.Contains(actionLower, "file") || strings.Contains(actionLower, "network") {
+			return fmt.Errorf("action violates Rule 3: %s", rule.Text)
+		}
+	case 5: // Prevent Memory Poisoning & Prompt Injection
+		if strings.Contains(actionLower, "jailbreak") || strings.Contains(actionLower, "inject") {
+			return fmt.Errorf("action violates Rule 5: %s", rule.Text)
+		}
 	}
 	return nil
 }

@@ -42,9 +42,15 @@ func Save(path string, p *Profile) error {
 
 // Placeholder for encryption
 func EncryptAPIKey(key string) string {
-	return key // TODO: implement encryption
+	// Simple XOR with a key
+	const xorKey = "aegiscourt_secret"
+	result := make([]byte, len(key))
+	for i, b := range []byte(key) {
+		result[i] = b ^ xorKey[i%len(xorKey)]
+	}
+	return string(result)
 }
 
 func DecryptAPIKey(encrypted string) string {
-	return encrypted // TODO: implement decryption
+	return EncryptAPIKey(encrypted) // XOR is symmetric
 }

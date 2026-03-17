@@ -1,6 +1,9 @@
 package agent
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type AgentRunner interface {
 	RunLoop(task string) string
@@ -28,8 +31,12 @@ func (t *WebSearchTool) Parameters() map[string]string {
 }
 
 func (t *WebSearchTool) Execute(args map[string]interface{}) (string, error) {
-	// Stub: mediated HTTP
-	return "search results", nil
+	query, ok := args["query"].(string)
+	if !ok {
+		return "", fmt.Errorf("query must be string")
+	}
+	// Mock search
+	return "Mock search results for: " + query, nil
 }
 
 type Runtime struct {

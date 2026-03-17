@@ -261,7 +261,7 @@ func runPropose(args []string) error {
 		return fmt.Errorf("failed to handle proposal: %w", err)
 	}
 
-	fmt.Printf("Proposal %s submitted and approved\n", proposal.ID)
+	fmt.Printf("Proposal %s submitted\n", proposal.ID)
 	return nil
 }
 
@@ -325,11 +325,24 @@ func courtCmd() *cobra.Command {
 func statusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show status",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Status: OK")
+		Short: "Show system status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runStatus()
 		},
 	}
+}
+
+func runStatus() error {
+	path := config.DefaultConfigPath()
+	cfg, err := config.Load(path)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	fmt.Printf("Configuration loaded from %s\n", path)
+	fmt.Printf("Court Mode: %s\n", cfg.CourtMode)
+	fmt.Printf("Preferred LLM: %s\n", cfg.PreferredLLM)
+	fmt.Printf("LLM Endpoint: %s\n", cfg.LLMEndpoint)
+	return nil
 }
 
 func logCmd() *cobra.Command {

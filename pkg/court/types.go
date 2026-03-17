@@ -1,6 +1,7 @@
 package court
 
 import (
+	"strings"
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch"
@@ -34,8 +35,13 @@ func NewEngine() *Engine {
 }
 
 func (e *Engine) RunReview(p Proposal) (bool, string) {
-	// Simulate court review
-	// For now, approve all proposals
-	reason := "Approved by court consensus"
-	return true, reason
+	// Simple rule-based review
+	if strings.Contains(strings.ToLower(p.Name), "harm") || strings.Contains(strings.ToLower(p.Description), "harm") {
+		return false, "Proposal violates Rule 1: Never Cause Irreversible Harm"
+	}
+	// Check other rules
+	if p.Type == "add-tool" && strings.Contains(p.Name, "unsafe") {
+		return false, "Unsafe tool addition rejected"
+	}
+	return true, "Approved by court consensus"
 }

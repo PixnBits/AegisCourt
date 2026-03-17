@@ -96,7 +96,7 @@ func (k *Kernel) HandleProposal(p court.Proposal) error {
 	approved, reason := k.CourtEngine.RunReview(p)
 	if !approved {
 		fmt.Printf("Proposal %s rejected: %s\n", p.ID, reason)
-		return nil // or error?
+		return nil // Do not apply
 	}
 
 	fmt.Printf("Proposal %s approved: %s\n", p.ID, reason)
@@ -109,7 +109,7 @@ func (k *Kernel) HandleProposal(p court.Proposal) error {
 			return fmt.Errorf("failed to apply mutation: %w", err)
 		}
 	}
-	fmt.Printf("Proposal %s approved and applied\n", p.ID)
+	fmt.Printf("Proposal %s applied\n", p.ID)
 	return nil
 }
 
