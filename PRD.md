@@ -1,8 +1,8 @@
 ---
 title: AegisCourt Product Requirements Document
 version: 0.5 (v0.2 real-features scope)
-date: 2026-03-16
-status: Active / In Implementation
+date: 2026-03-17
+status: v0.2 Implemented
 ---
 
 **Lean PRD – AegisCourt: Constitutional Self-Evolving Agent Framework (v0.2 – Real Seed Kernel + Guided Evolution)**

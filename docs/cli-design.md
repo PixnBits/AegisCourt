@@ -1,6 +1,6 @@
 # AegisCourt CLI Design & Specification
-**Version:** 0.2-draft  
-**Status:** Active (v0.2 scope – real features only, single-user)  
+**Version:** 0.2  
+**Status:** Implemented (v0.2 scope -- real features, single-user)  
 **Goal:** Define a secure, minimalist, Unix-inspired CLI that serves as the primary (and initially only) operator interface for AegisCourt. This document lives alongside PRD.md §5.4 and will evolve via Court-approved changes.
 
 ## 1. Design Principles

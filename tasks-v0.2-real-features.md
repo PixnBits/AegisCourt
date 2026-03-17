@@ -1,5 +1,5 @@
 # Tasks – v0.2 Real Features
-**Status:** Active / Implementation Target  
+**Status:** Implemented  
 **Scope:** This file lists **only** the must-have, end-to-end working tasks for v0.2 release.  
 No stubs, no partial features, no multi-user/crypto signoff, no TUI, no webhook, no external plugins, no full NIST reports, no Kubernetes operator.  
 Everything here must ship complete and usable by a single user in Hobbyist Auto / Indie Assisted modes.
