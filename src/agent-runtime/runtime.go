@@ -38,7 +38,7 @@ func (r *AgentRuntime) RunOneShot(task string) (string, error) {
 		r.Audit.LogEvent("agent_run_start", map[string]string{"task": task})
 	}
 
-	response, err := r.LLM.CallPersona("default", task)
+	response, err := r.LLM.CallPersona("default", task, map[string]interface{}{})
 	if err != nil {
 		if r.Audit != nil {
 			r.Audit.LogEvent("agent_run_error", map[string]string{"error": err.Error()})

@@ -5,7 +5,7 @@ import (
 )
 
 func TestProposalManager(t *testing.T) {
-	pm := NewProposalManager("/tmp")
+	pm := NewProposalManager("/tmp/test_proposals")
 
 	// Submit a proposal
 	proposal := Proposal{
@@ -49,5 +49,72 @@ func TestProposalManager(t *testing.T) {
 	_, err = pm.Submit(invalidProposal)
 	if err == nil {
 		t.Error("Submit should fail for invalid type")
+	}
+
+	// List all
+	all, err := pm.List("")
+	if err != nil {
+		t.Fatalf("List all failed: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("List all length: got %d, want 2", len(all))
+	}
+}
+
+func TestValidateProposal(t *testing.T) {
+	tests := []struct {
+		name        string
+		proposal    Proposal
+		wantAllowed bool
+		wantReason  string
+	}{
+		{
+			name: "valid proposal",
+			proposal: Proposal{
+				Name:        "web_search_tool",
+				Description: "Add a tool to search the web safely",
+			},
+			wantAllowed: true,
+			wantReason:  "",
+		},
+		{
+			name: "short name",
+			proposal: Proposal{
+				Name:        "x",
+				Description: "Add tool",
+			},
+			wantAllowed: false,
+			wantReason:  "Rejected: Insufficient detail (Rule 6 violation)",
+		},
+		{
+			name: "gibberish name",
+			proposal: Proposal{
+				Name:        "qwerty@#$%",
+				Description: "Add a tool to do something useful",
+			},
+			wantAllowed: false,
+			wantReason:  "Rejected: Unreviewable input (Rule 6 violation)",
+		},
+		{
+			name: "too many special chars",
+			proposal: Proposal{
+				Name:        "!@#$%^&*()qwerty",
+				Description: "Add a tool to do something useful",
+			},
+			wantAllowed: false,
+			wantReason:  "Rejected: Unreviewable input (Rule 6 violation)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			allowed, reason := ValidateProposal(tt.proposal)
+			if allowed != tt.wantAllowed {
+				t.Errorf("ValidateProposal() allowed = %v, want %v", allowed, tt.wantAllowed)
+			}
+			if reason != tt.wantReason {
+				t.Errorf("ValidateProposal() reason = %v, want %v", reason, tt.wantReason)
+			}
+		})
 	}
 }

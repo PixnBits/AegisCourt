@@ -33,7 +33,7 @@ func NewRouter(provider, endpoint, model, apiKey string) *Router {
 }
 
 // CallPersona calls the LLM for a specific persona.
-func (r *Router) CallPersona(persona string, prompt string) (string, error) {
+func (r *Router) CallPersona(persona string, prompt string, options map[string]interface{}) (string, error) {
 	provider, exists := r.personaProviders[persona]
 	if !exists {
 		provider = r.primaryProvider
@@ -44,5 +44,5 @@ func (r *Router) CallPersona(persona string, prompt string) (string, error) {
 		log.Printf("Warning: High-risk model %s used: %s", provider.Model(), reason)
 		// TODO: force multi-reviewer mode
 	}
-	return provider.Generate(prompt, nil)
+	return provider.Generate(prompt, options)
 }

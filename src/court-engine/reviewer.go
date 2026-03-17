@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	llmrouter "aegiscourt/src/llm-router"
+	"aegiscourt/src/sandbox"
 )
 
 // ReviewerResult represents the result from a reviewer persona.
@@ -32,7 +34,7 @@ type CourtEngine struct {
 func NewCourtEngine(dataDir string) *CourtEngine {
 	return &CourtEngine{
 		ProposalMgr: NewProposalManager(dataDir),
-		LLMRouter:   llmrouter.NewRouter("ollama", "http://127.0.0.1:11434", "nemotron-3-nano", ""),
+		LLMRouter:   llmrouter.NewRouter("ollama", "http://127.0.0.1:11434", "llama3.2:latest", ""),
 		Personas:    []string{"CISO", "MRM", "Compliance & Regulatory", "Responsible AI", "SRE", "Helpfulness & Evolution"},
 	}
 }
@@ -57,28 +59,15 @@ func (ce *CourtEngine) RunReview(id string) error {
 		return fmt.Errorf("proposal not pending")
 	}
 
-	// Simulate reviewers: CISO and Helpfulness (for speed)
-	results := []ReviewerResult{
-		{
-			Persona:        "CISO",
-			RiskSeverity:   "Medium",
-			KeyConcerns:    []string{"Potential for data exfiltration", "Need sandbox validation"},
-			Mitigations:    []string{"Enforce strict I/O controls", "Audit all operations"},
-			Pros:           []string{"Enhances agent capabilities", "Controlled environment"},
-			Cons:           []string{"Increases attack surface", "Requires careful implementation"},
-			Score:          7,
-			Recommendation: "Approve with mitigations",
-		},
-		{
-			Persona:        "Helpfulness & Evolution",
-			RiskSeverity:   "Low",
-			KeyConcerns:    []string{"Tool must be genuinely useful", "Avoid feature bloat"},
-			Mitigations:    []string{"Test usability", "Ensure reversible"},
-			Pros:           []string{"Improves user experience", "Enables evolution"},
-			Cons:           []string{"May introduce bugs", "Learning curve"},
-			Score:          9,
-			Recommendation: "Approve",
-		},
+	var results []ReviewerResult
+	for _, persona := range ce.Personas {
+		result, err := ce.reviewByPersona(persona, proposal)
+		if err != nil {
+			// Log error but continue with others
+			fmt.Printf("Error reviewing by %s: %v\n", persona, err)
+			continue
+		}
+		results = append(results, result)
 	}
 
 	proposal.Status = "reviewed"
@@ -88,22 +77,80 @@ func (ce *CourtEngine) RunReview(id string) error {
 	return ce.ProposalMgr.saveProposal(proposal)
 }
 
+// AskQuestion asks a clarifying question about a proposal.
+func (ce *CourtEngine) AskQuestion(proposalID string, question string, targetPersonas []string) (map[string]string, error) {
+	proposal, err := ce.ProposalMgr.Get(proposalID)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(targetPersonas) == 0 {
+		targetPersonas = ce.Personas
+	}
+
+	answers := make(map[string]string)
+	for _, persona := range targetPersonas {
+		prompt := fmt.Sprintf("You are the %s reviewer. Answer this clarifying question about the proposal '%s' (description: %s): %s", persona, proposal.Name, proposal.Description, question)
+		response, err := ce.LLMRouter.CallPersona(persona, prompt, map[string]interface{}{"temperature": 0.2, "max_tokens": 300})
+		if err != nil {
+			answers[persona] = fmt.Sprintf("Error: %v", err)
+		} else {
+			answers[persona] = response
+		}
+	}
+
+	// Add to proposal QAs
+	qa := QAEntry{
+		Question:  question,
+		Answers:   answers,
+		Timestamp: time.Now(),
+	}
+	proposal.QAs = append(proposal.QAs, qa)
+	ce.ProposalMgr.saveProposal(proposal)
+
+	return answers, nil
+}
+
 // reviewByPersona performs review by a single persona.
 func (ce *CourtEngine) reviewByPersona(persona string, proposal *Proposal) (ReviewerResult, error) {
-	// Load prompt template
 	promptTemplate, err := loadPersonaPrompt(persona)
 	if err != nil {
 		return ReviewerResult{}, err
 	}
 
+	// Load constitution
+	constitutionData, err := os.ReadFile("docs/constitution.md")
+	if err != nil {
+		return ReviewerResult{}, fmt.Errorf("failed to load constitution: %w", err)
+	}
+	constitution := string(constitutionData)
+
+	// Extract facts if not low resource
+	facts := "{}"
+	if !sandbox.IsLowResourceMode() {
+		factsPrompt := fmt.Sprintf("Extract key facts from the proposal. Proposal name: %s\nDescription: %s\nDiff: %s\nOutput JSON: {\"summary\": \"...\", \"risks\": \"...\", \"benefits\": \"...\"}", proposal.Name, proposal.Description, string(proposal.Diff))
+		factsResponse, err := ce.LLMRouter.CallPersona(persona, factsPrompt, map[string]interface{}{"temperature": 0.1, "max_tokens": 200})
+		if err != nil {
+			// Fallback to empty
+			facts = "{}"
+		} else {
+			facts = factsResponse
+		}
+	}
+
 	// Replace placeholders
-	prompt := strings.ReplaceAll(promptTemplate, "{{proposal_description}}", proposal.Description)
+	prompt := strings.ReplaceAll(promptTemplate, "{{proposal_name}}", proposal.Name)
+	prompt = strings.ReplaceAll(prompt, "{{proposal_description}}", proposal.Description)
 	prompt = strings.ReplaceAll(prompt, "{{proposal_diff}}", string(proposal.Diff))
-	// TODO: constitution rules
-	prompt = strings.ReplaceAll(prompt, "{{constitution_rules}}", "Mock constitution rules")
+	prompt = strings.ReplaceAll(prompt, "{{constitution_text}}", constitution)
+	prompt = strings.ReplaceAll(prompt, "{{facts}}", facts)
 
 	// Call LLM
-	response, err := ce.LLMRouter.CallPersona(persona, prompt)
+	options := map[string]interface{}{
+		"temperature": 0.3,
+		"max_tokens":  500,
+	}
+	response, err := ce.LLMRouter.CallPersona(persona, prompt, options)
 	if err != nil {
 		return ReviewerResult{}, err
 	}
@@ -112,7 +159,7 @@ func (ce *CourtEngine) reviewByPersona(persona string, proposal *Proposal) (Revi
 	var result ReviewerResult
 	err = json.Unmarshal([]byte(response), &result)
 	if err != nil {
-		return ReviewerResult{}, err
+		return ReviewerResult{}, fmt.Errorf("failed to parse LLM response as JSON: %s", response)
 	}
 	result.Persona = persona
 
