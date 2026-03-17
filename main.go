@@ -117,6 +117,9 @@ func main() {
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "--help":
+			printHelp()
+			return
 		case "audit":
 			if len(os.Args) > 2 && os.Args[2] == "verify" {
 				intact, errs := audit.Verify()
@@ -173,6 +176,13 @@ func main() {
 		case "utc":
 			fmt.Println(time.Now().UTC().Format(time.RFC3339))
 			return
+		case "agent":
+			if len(os.Args) > 2 && os.Args[2] == "run" && len(os.Args) > 3 {
+				task := strings.Join(os.Args[3:], " ")
+				handleAgentRun(task)
+				return
+			}
+			fallthrough
 		case "benchmark":
 			if len(os.Args) > 2 && os.Args[2] == "llm" {
 				handleBenchmarkLLM()
@@ -407,6 +417,21 @@ func handleBenchmarkLLM() {
 	fmt.Printf("LLM call took %v\n", duration)
 }
 
+func handleAgentRun(task string) {
+	// Basic tool calling: if mentions time, use utc tool
+	if strings.Contains(strings.ToLower(task), "time") {
+		fmt.Println(time.Now().UTC().Format(time.RFC3339))
+		return
+	}
+	// Else, route to LLM
+	response, err := llm.CallLLM(task, "")
+	if err != nil {
+		log.Printf("Agent run failed: %v", err)
+		return
+	}
+	fmt.Println(response)
+}
+
 func handleStatus() {
 	resources := DetectResources()
 	fmt.Printf("System Resources:\n")
@@ -444,4 +469,23 @@ func handleStatus() {
 	} else {
 		fmt.Println("Court Results: 0")
 	}
+}
+
+func printHelp() {
+	fmt.Println("AegisCourt v0.2 - Secure Agent Framework")
+	fmt.Println()
+	fmt.Println("Commands:")
+	fmt.Println("  agent run <task>          Run agent on a task")
+	fmt.Println("  audit verify              Verify audit log integrity")
+	fmt.Println("  benchmark llm             Benchmark LLM response time")
+	fmt.Println("  court list                List proposals (stub)")
+	fmt.Println("  court view <id>           View court result for proposal")
+	fmt.Println("  court run <id>            Run court on proposal")
+	fmt.Println("  court apply <id>          Apply approved proposal")
+	fmt.Println("  court rollback <id>       Rollback applied proposal")
+	fmt.Println("  propose agent-help <req>  Generate proposal draft")
+	fmt.Println("  propose guide --draft <id> Interactive proposal wizard")
+	fmt.Println("  status                    Show system status")
+	fmt.Println("  utc                       Get current UTC time")
+	fmt.Println("  --help                    Show this help")
 }
