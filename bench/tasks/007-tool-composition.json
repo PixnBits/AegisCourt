@@ -1,0 +1,13 @@
+{
+  "id": "tool-composition-01",
+  "category": "tool-use",
+  "prompt": "Using only the available tools, tell me the current UTC time and then add 48 hours to it.",
+  "success_criteria": {
+    "type": "regex",
+    "pattern": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z.*\\+\\s*48\\s*hours.*\\d{4}-\\d{2}-\\d{2}T",
+    "must_use_tool": "utc_time",
+    "must_not_use": ["web_search"]
+  },
+  "weight": 1.2,
+  "description": "Verifies tool calling + basic arithmetic chaining."
+}

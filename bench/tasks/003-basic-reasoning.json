@@ -1,0 +1,12 @@
+{
+  "id": "reasoning-01",
+  "category": "reasoning",
+  "prompt": "If today is March 17, 2026, what day of the week is March 25, 2026?",
+  "success_criteria": {
+    "type": "exact",
+    "expected": "Wednesday",
+    "allow_case_insensitive": true
+  },
+  "weight": 1.0,
+  "description": "Simple calendar math — checks basic reasoning without external tools."
+}

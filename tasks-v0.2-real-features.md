@@ -128,6 +128,14 @@ Everything here must ship complete and usable by a single user in Hobbyist Auto 
     - Compare success delta  
     - Flag in `status` if > threshold drop → suggest rollback
 
+16a. Define & implement canned benchmark tasks
+    - Create bench/tasks/ directory with 5–10 JSON/md files (prompt + success criteria)
+    - Cover: time/tool use, reasoning, basic research, error handling
+    - Add runner function: execute agent on each task, judge pass/fail (LLM-as-judge or simple match)
+    - Integrate into post-approval flow: run before/after, compute delta, flag regression
+    - Expose via CLI: bench run --before-mutation --after-mutation <proposal-id>
+    - Update propose guide & agent-help prompts to reference these tasks in validation_plan
+
 17. File-based notifications  
     - Append-only `~/.aegiscourt/notifications.jsonl` for proposal events
 

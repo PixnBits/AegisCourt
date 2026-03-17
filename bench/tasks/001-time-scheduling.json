@@ -1,0 +1,19 @@
+{
+  "id": "time-scheduling-01",
+  "category": "scheduling/tool-use",
+  "prompt": "Create a reminder for a team meeting tomorrow at 9:00 AM local time in Phoenix, Arizona.",
+  "success_criteria": {
+    "type": "contains",
+    "patterns": [
+      "tomorrow",
+      "9:00 AM",
+      "Phoenix",
+      "reminder",
+      "meeting"
+    ],
+    "must_use_tool": "utc_time",
+    "must_not_use": ["web_search", "external api"]
+  },
+  "weight": 1.2,
+  "description": "Tests time awareness and mediated clock usage without broad network access."
+}

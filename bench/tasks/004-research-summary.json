@@ -1,0 +1,12 @@
+{
+  "id": "research-summary-01",
+  "category": "research/knowledge",
+  "prompt": "Summarize the main plot of 'Dune' by Frank Herbert in exactly 3 sentences.",
+  "success_criteria": {
+    "type": "llm-judge",
+    "judge_prompt": "Score 0–1: Does the summary accurately capture the core plot of Dune (Paul Atreides, Arrakis, spice, Harkonnens/Atreides conflict, no major spoilers beyond setup)? 1 = accurate & concise, 0 = wrong/missing key elements or hallucinates.",
+    "pass_threshold": 0.8
+  },
+  "weight": 1.0,
+  "description": "Tests factual recall and summarization without web access."
+}

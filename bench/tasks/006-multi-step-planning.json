@@ -1,0 +1,12 @@
+{
+  "id": "planning-01",
+  "category": "planning",
+  "prompt": "I need to prepare for a 3-day trip to New York next month. List 5 essential items I should pack, in order of importance.",
+  "success_criteria": {
+    "type": "llm-judge",
+    "judge_prompt": "Score 0–1: Does the list contain 5 reasonable items, ordered sensibly by importance (e.g. passport/ID first, then clothes, charger, meds, etc.)? 1 = logical & complete, 0 = irrelevant or missing basics.",
+    "pass_threshold": 0.85
+  },
+  "weight": 1.0,
+  "description": "Tests multi-step reasoning and prioritization."
+}

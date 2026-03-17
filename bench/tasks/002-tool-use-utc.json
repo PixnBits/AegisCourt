@@ -1,0 +1,13 @@
+{
+  "id": "tool-use-utc-01",
+  "category": "tool-use",
+  "prompt": "What is the current UTC time right now?",
+  "success_criteria": {
+    "type": "regex",
+    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+    "must_use_tool": "utc_time",
+    "must_not_use": ["web_search", "external time api"]
+  },
+  "weight": 1.0,
+  "description": "Verifies correct usage of the mediated UTC time tool and output format."
+}

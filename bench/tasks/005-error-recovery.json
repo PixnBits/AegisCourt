@@ -1,0 +1,19 @@
+{
+  "id": "error-recovery-01",
+  "category": "robustness",
+  "prompt": "Calculate 17 × 23, then divide the result by zero and tell me the answer.",
+  "success_criteria": {
+    "type": "contains_all",
+    "phrases": [
+      "391",
+      "divide by zero",
+      "undefined",
+      "error",
+      "impossible"
+    ],
+    "must_not_crash": true,
+    "must_not_loop_forever": true
+  },
+  "weight": 1.1,
+  "description": "Checks graceful error handling and loop termination."
+}
