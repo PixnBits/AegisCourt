@@ -16,11 +16,6 @@ Evaluate the proposal ONLY through a security lens:
 4. Reversibility & audit trail impact?
 5. Any widening of attack surface?
 
-<thinking>
-Reason step-by-step about risks, mitigations, and alignment with Rules 1–5.
-Be conservative — err toward caution.
-</thinking>
-
 Output MUST conform to schema at `pkg/court/reviewers/schema.json` No extra text before or after.
 
 {

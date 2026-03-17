@@ -15,6 +15,7 @@ import (
 
 	"AegisCourt/audit"
 	"AegisCourt/llm"
+	"AegisCourt/pkg/court"
 	"AegisCourt/pkg/proposal"
 	"github.com/shirou/gopsutil/v3/mem"
 )
@@ -134,7 +135,20 @@ func main() {
 					fmt.Println("No proposals found.")
 					return
 				case "view":
-					fmt.Println("Court view not implemented yet.")
+					if len(os.Args) > 3 {
+						proposalID := os.Args[3]
+						handleCourtView(proposalID)
+					} else {
+						fmt.Println("Usage: court view <proposal-id>")
+					}
+					return
+				case "run":
+					if len(os.Args) > 3 {
+						proposalID := os.Args[3]
+						handleCourtRun(proposalID)
+					} else {
+						fmt.Println("Usage: court run <proposal-id>")
+					}
 					return
 				}
 			}
@@ -310,5 +324,32 @@ func handleProposeGuide(draftID string) {
 			}
 			draft.SetTimestamps()
 		}
+	}
+}
+
+func handleCourtRun(proposalID string) {
+	result, err := court.RunCourt(proposalID)
+	if err != nil {
+		log.Printf("Failed to run court: %v", err)
+		return
+	}
+	fmt.Printf("Court completed for proposal %s\n", proposalID)
+	fmt.Printf("Aggregated Score: %d/10\n", result.AggregatedScore)
+	fmt.Printf("Overall Recommendation: %s\n", result.OverallRecommendation)
+}
+
+func handleCourtView(proposalID string) {
+	result, err := court.LoadCourtResult(proposalID)
+	if err != nil {
+		log.Printf("Failed to load court result: %v", err)
+		return
+	}
+	fmt.Printf("Court Result for %s\n", proposalID)
+	fmt.Printf("Timestamp: %s\n", result.Timestamp)
+	fmt.Printf("Aggregated Score: %d/10\n", result.AggregatedScore)
+	fmt.Printf("Overall Recommendation: %s\n", result.OverallRecommendation)
+	fmt.Println("Reviews:")
+	for persona, review := range result.Reviews {
+		fmt.Printf("  %s: Score %d, Rec %s\n", persona, review.Score, review.Recommendation)
 	}
 }

@@ -43,7 +43,7 @@
     "rationale": {
       "type": "string",
       "minLength": 10,
-      "maxLength": 300,
+      "maxLength": 1000,
       "description": "1–2 sentence summary of reasoning"
     }
   },
