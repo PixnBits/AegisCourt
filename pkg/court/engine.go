@@ -25,18 +25,18 @@ const (
 )
 
 type CourtResult struct {
-	ProposalID      string            `json:"proposal_id"`
-	ProposalTitle   string            `json:"proposal_title"`
-	Status          ProposalStatus    `json:"status"`
-	CourtMode       string            `json:"court_mode"`
-	AggregateScore  float64           `json:"aggregate_score"`
-	Recommendation  string            `json:"recommendation"`
-	ReviewerResults []ReviewerResult  `json:"reviewer_results"`
-	Conditions      []string          `json:"conditions"`
-	StartedAt       string            `json:"started_at"`
-	CompletedAt     string            `json:"completed_at"`
-	VoteAction      string            `json:"vote_action,omitempty"`
-	VoteNotes       string            `json:"vote_notes,omitempty"`
+	ProposalID      string           `json:"proposal_id"`
+	ProposalTitle   string           `json:"proposal_title"`
+	Status          ProposalStatus   `json:"status"`
+	CourtMode       string           `json:"court_mode"`
+	AggregateScore  float64          `json:"aggregate_score"`
+	Recommendation  string           `json:"recommendation"`
+	ReviewerResults []ReviewerResult `json:"reviewer_results"`
+	Conditions      []string         `json:"conditions"`
+	StartedAt       string           `json:"started_at"`
+	CompletedAt     string           `json:"completed_at"`
+	VoteAction      string           `json:"vote_action,omitempty"`
+	VoteNotes       string           `json:"vote_notes,omitempty"`
 }
 
 type ReviewerResult struct {
@@ -145,7 +145,7 @@ func (e *Engine) callReviewer(ctx context.Context, reviewer ReviewerPersona, pro
 	if err != nil {
 		// Retry once with error feedback
 		retryMessages := append(messages, llm.ChatMessage{
-			Role: "user",
+			Role:    "user",
 			Content: fmt.Sprintf("Your previous response had a validation error: %s\nPlease output ONLY valid JSON matching the schema exactly. No text outside the JSON.", err),
 		})
 		response, model, err2 := e.Router.Chat(ctx, retryMessages, true)

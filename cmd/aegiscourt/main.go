@@ -1213,9 +1213,9 @@ Show runtime overview: resources, pending proposals, Court state.`)
 				"cpu_count":    res.CPUCount,
 				"gpu":          res.GPUName,
 			},
-			"proposals_pending":   pending,
-			"proposals_reviewed":  active,
-			"proposals_decided":   completed,
+			"proposals_pending":  pending,
+			"proposals_reviewed": active,
+			"proposals_decided":  completed,
 		}, "", "  ")
 		fmt.Println(string(data))
 	}

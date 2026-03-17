@@ -10,11 +10,11 @@ import (
 )
 
 type SystemResources struct {
-	TotalRAMGB   float64
-	FreeRAMGB    float64
-	GPUName      string
-	GPUVramGB    float64
-	CPUCount     int
+	TotalRAMGB float64
+	FreeRAMGB  float64
+	GPUName    string
+	GPUVramGB  float64
+	CPUCount   int
 }
 
 func Detect() *SystemResources {

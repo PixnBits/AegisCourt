@@ -151,12 +151,12 @@ func (c *Config) ListKeys() map[string]string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return map[string]string{
-		"preferred_llm":    c.PreferredLLM,
-		"llm_endpoint":     c.LLMEndpoint,
-		"court.mode":       string(c.CourtMode),
+		"preferred_llm":     c.PreferredLLM,
+		"llm_endpoint":      c.LLMEndpoint,
+		"court.mode":        string(c.CourtMode),
 		"low_resource_mode": fmt.Sprintf("%t", c.LowResourceMode),
-		"risk_tolerance":   fmt.Sprintf("%d", c.RiskTolerance),
-		"defer_timeout":    c.DeferTimeout,
-		"profile_template": c.ProfileTemplate,
+		"risk_tolerance":    fmt.Sprintf("%d", c.RiskTolerance),
+		"defer_timeout":     c.DeferTimeout,
+		"profile_template":  c.ProfileTemplate,
 	}
 }
