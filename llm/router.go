@@ -14,8 +14,8 @@ import (
 )
 
 type Config struct {
-	Endpoint      string `json:"endpoint"`
-	PrimaryModel  string `json:"primary_model"`
+	Endpoint      string `json:"llm_endpoint"`
+	PrimaryModel  string `json:"llm_model"`
 	FallbackModel string `json:"fallback_model"`
 }
 
@@ -32,14 +32,17 @@ func loadConfig() (Config, error) {
 		// Default config
 		return Config{
 			Endpoint:      "http://localhost:11434",
-			PrimaryModel:  "nemotron-3-nano",
-			FallbackModel: "llama3.2:3b-instruct",
+			PrimaryModel:  "llama3.2:latest",
+			FallbackModel: "llama3.2:latest",
 		}, nil
 	}
 	defer file.Close()
 	var config Config
 	if err := json.NewDecoder(file).Decode(&config); err != nil {
 		return Config{}, err
+	}
+	if config.FallbackModel == "" {
+		config.FallbackModel = "llama3.2:latest"
 	}
 	return config, nil
 }

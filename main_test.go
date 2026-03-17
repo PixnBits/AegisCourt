@@ -19,8 +19,8 @@ func TestDetectResources(t *testing.T) {
 			t.Errorf("Should not suggest sequential")
 		}
 	} else {
-		if resources.RecommendedLLM != "llama3.2:3b-instruct" {
-			t.Errorf("Expected llama3.2:3b-instruct, got %s", resources.RecommendedLLM)
+		if resources.RecommendedLLM != "llama3.2:latest" {
+			t.Errorf("Expected llama3.2:latest, got %s", resources.RecommendedLLM)
 		}
 		if !resources.SuggestSequential {
 			t.Errorf("Should suggest sequential")

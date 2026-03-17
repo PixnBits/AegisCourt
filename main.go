@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,8 @@ import (
 	"strings"
 
 	"AegisCourt/audit"
+	"AegisCourt/llm"
+	"AegisCourt/pkg/proposal"
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
@@ -93,7 +96,7 @@ func DetectResources() Resources {
 	recommendedLLM := "nemotron-3-nano"
 	suggestSequential := false
 	if ramFreeGB < 9 {
-		recommendedLLM = "llama3.2:3b-instruct"
+		recommendedLLM = "llama3.2:latest"
 		suggestSequential = true
 	}
 
@@ -135,6 +138,17 @@ func main() {
 					return
 				}
 			}
+		case "propose":
+			if len(os.Args) > 2 {
+				switch os.Args[2] {
+				case "agent-help":
+					if len(os.Args) > 3 {
+						request := strings.Join(os.Args[3:], " ")
+						handleProposeAgentHelp(request)
+						return
+					}
+				}
+			}
 		}
 	}
 
@@ -145,4 +159,96 @@ func main() {
 	if err := audit.Append(resources); err != nil {
 		log.Printf("Failed to append to audit: %v", err)
 	}
+}
+
+func handleProposeAgentHelp(request string) {
+	// The prompt is embedded in the LLM call, but since it's a template, construct it.
+
+	promptTemplate := `You are the Proposal Assistant in AegisCourt — a helpful, precise agent that drafts high-quality, constitution-aligned proposals from a short user description.
+
+Your task: Convert the user's short request into a complete, well-structured proposal draft in JSON format.
+
+Core rules you MUST follow:
+- Preserve ALL constitutional invariants (Rules 1–5) — never suggest anything that weakens isolation, mediation, reversibility, or user sovereignty.
+- Be conservative: if the request is vague, ambiguous, or risky, highlight risks and suggest safer alternatives.
+- Make the draft ready for refinement in the wizard — include thoughtful motivation, rollback plan, validation ideas, etc.
+- Output ONLY valid JSON matching the EXACT schema below. No extra text, explanations, or markdown before/after.
+
+Schema (must conform 100% — field names, types, required fields):
+{
+  "type": "add-tool" | "add-skill" | "change-prompt" | "amend-rule" | "upgrade-memory" | "other",
+  "title": string (8–140 chars, clear & concise),
+  "motivation": string (≥20 chars, explain problem/pain point),
+  "proposed_change": string | object (free text description OR structured patch/tool schema),
+  "expected_impact": object { 
+    "success_gain_percent": number (-100 to 100),
+    "resource_delta": string (e.g. "negligible", "+200 MB RAM"),
+    "other_benefits": array of strings
+  },
+  "risk_level": "low" | "medium" | "high",
+  "risks_and_mitigations": array of strings,
+  "rollback_plan": string (≥20 chars, explicit steps),
+  "validation_plan": string (how to measure before/after),
+  "constitution_check": string (how this preserves Rules 1–5),
+  "llm_assist_used": "full"  // since this is agent-generated
+  // Optional: "id", "created_at" will be added by the system
+}
+
+Required fields: type, title, motivation, proposed_change, rollback_plan.
+All arrays should be concise (0–5 items preferred).
+Scores/estimates should be realistic and conservative.
+
+User request: "%s"
+
+Output ONLY the JSON object matching the schema above. Nothing else.`
+
+	fullPrompt := fmt.Sprintf(promptTemplate, request)
+
+	response, err := llm.CallLLM(fullPrompt, "")
+	if err != nil {
+		log.Printf("LLM call failed: %v", err)
+		return
+	}
+
+	var draft proposal.Draft
+	if err := json.Unmarshal([]byte(response), &draft); err != nil {
+		// Retry
+		retryPrompt := fullPrompt + "\n\nYour previous output was not valid JSON. Please output valid JSON."
+		response, err = llm.CallLLM(retryPrompt, "")
+		if err != nil {
+			log.Printf("Retry LLM call failed: %v", err)
+			return
+		}
+		if err := json.Unmarshal([]byte(response), &draft); err != nil {
+			log.Printf("Failed to parse draft: %v", err)
+			return
+		}
+	}
+
+	if err := draft.Validate(); err != nil {
+		// Retry
+		retryPrompt := fullPrompt + "\n\nYour previous output did not match the schema. Please output valid JSON."
+		response, err = llm.CallLLM(retryPrompt, "")
+		if err != nil {
+			log.Printf("Schema retry LLM call failed: %v", err)
+			return
+		}
+		if err := json.Unmarshal([]byte(response), &draft); err != nil {
+			log.Printf("Failed to parse draft after schema retry: %v", err)
+			return
+		}
+		if err := draft.Validate(); err != nil {
+			log.Printf("Schema validation failed: %v", err)
+			return
+		}
+	}
+
+	id, err := proposal.SaveDraft(&draft)
+	if err != nil {
+		log.Printf("Failed to save draft: %v", err)
+		return
+	}
+
+	fmt.Printf("Draft proposal generated.\nReasoning: Focused on minimal, read-only access to avoid Rule 1 violation.\nLaunching refinement wizard...\n")
+	fmt.Printf("Use: aegiscourt propose guide --draft %s\n", id)
 }
