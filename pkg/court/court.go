@@ -1,6 +1,7 @@
 package court
 
 import (
+	"AegisCourt/audit"
 	"AegisCourt/pkg/court/reviewers"
 	"AegisCourt/pkg/proposal"
 	"encoding/json"
@@ -111,4 +112,43 @@ func LoadCourtResult(proposalID string) (*CourtResult, error) {
 		return nil, err
 	}
 	return &result, nil
+}
+
+func ApplyProposal(proposalID string) error {
+	result, err := LoadCourtResult(proposalID)
+	if err != nil {
+		return fmt.Errorf("failed to load court result: %v", err)
+	}
+	if result.OverallRecommendation != "approve" && result.OverallRecommendation != "conditional" {
+		return fmt.Errorf("proposal not approved for application")
+	}
+
+	// "Apply" the change - in real, this would execute the proposed_change
+	// For demo, just audit
+	auditPayload := map[string]interface{}{
+		"action":      "apply_proposal",
+		"proposal_id": proposalID,
+		"result":      result,
+	}
+	if auditErr := audit.Append(auditPayload); auditErr != nil {
+		return fmt.Errorf("failed to audit apply: %v", auditErr)
+	}
+
+	fmt.Printf("Proposal %s applied successfully.\n", proposalID)
+	return nil
+}
+
+func RollbackProposal(proposalID string) error {
+	// "Rollback" - in real, revert the change
+	// For demo, audit
+	auditPayload := map[string]interface{}{
+		"action":       "rollback_proposal",
+		"proposal_id":  proposalID,
+	}
+	if auditErr := audit.Append(auditPayload); auditErr != nil {
+		return fmt.Errorf("failed to audit rollback: %v", auditErr)
+	}
+
+	fmt.Printf("Proposal %s rolled back successfully.\n", proposalID)
+	return nil
 }

@@ -150,6 +150,22 @@ func main() {
 						fmt.Println("Usage: court run <proposal-id>")
 					}
 					return
+				case "apply":
+					if len(os.Args) > 3 {
+						proposalID := os.Args[3]
+						handleCourtApply(proposalID)
+					} else {
+						fmt.Println("Usage: court apply <proposal-id>")
+					}
+					return
+				case "rollback":
+					if len(os.Args) > 3 {
+						proposalID := os.Args[3]
+						handleCourtRollback(proposalID)
+					} else {
+						fmt.Println("Usage: court rollback <proposal-id>")
+					}
+					return
 				}
 			}
 		case "propose":
@@ -351,5 +367,17 @@ func handleCourtView(proposalID string) {
 	fmt.Println("Reviews:")
 	for persona, review := range result.Reviews {
 		fmt.Printf("  %s: Score %d, Rec %s\n", persona, review.Score, review.Recommendation)
+	}
+}
+
+func handleCourtApply(proposalID string) {
+	if err := court.ApplyProposal(proposalID); err != nil {
+		log.Printf("Failed to apply proposal: %v", err)
+	}
+}
+
+func handleCourtRollback(proposalID string) {
+	if err := court.RollbackProposal(proposalID); err != nil {
+		log.Printf("Failed to rollback proposal: %v", err)
 	}
 }
