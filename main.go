@@ -136,6 +136,9 @@ func main() {
 		case "court":
 			if len(os.Args) > 2 {
 				switch os.Args[2] {
+				case "--help":
+					printCourtHelp()
+					return
 				case "list":
 					fmt.Println("No proposals found.")
 					return
@@ -193,8 +196,12 @@ func main() {
 		case "status":
 			handleStatus()
 			return
+		case "propose":
 			if len(os.Args) > 2 {
 				switch os.Args[2] {
+				case "--help":
+					printProposeHelp()
+					return
 				case "agent-help":
 					if len(os.Args) > 3 {
 						request := strings.Join(os.Args[3:], " ")
@@ -478,14 +485,24 @@ func printHelp() {
 	fmt.Println("  agent run <task>          Run agent on a task")
 	fmt.Println("  audit verify              Verify audit log integrity")
 	fmt.Println("  benchmark llm             Benchmark LLM response time")
+	fmt.Println("  court --help              Court commands")
+	fmt.Println("  propose --help            Proposal commands")
+	fmt.Println("  status                    Show system status")
+	fmt.Println("  utc                       Get current UTC time")
+	fmt.Println("  --help                    Show this help")
+}
+
+func printCourtHelp() {
+	fmt.Println("Court Commands:")
 	fmt.Println("  court list                List proposals (stub)")
 	fmt.Println("  court view <id>           View court result for proposal")
 	fmt.Println("  court run <id>            Run court on proposal")
 	fmt.Println("  court apply <id>          Apply approved proposal")
 	fmt.Println("  court rollback <id>       Rollback applied proposal")
+}
+
+func printProposeHelp() {
+	fmt.Println("Proposal Commands:")
 	fmt.Println("  propose agent-help <req>  Generate proposal draft")
 	fmt.Println("  propose guide --draft <id> Interactive proposal wizard")
-	fmt.Println("  status                    Show system status")
-	fmt.Println("  utc                       Get current UTC time")
-	fmt.Println("  --help                    Show this help")
 }
