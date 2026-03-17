@@ -147,6 +147,12 @@ func main() {
 						handleProposeAgentHelp(request)
 						return
 					}
+				case "guide":
+					if len(os.Args) > 4 && os.Args[3] == "--draft" {
+						draftID := os.Args[4]
+						handleProposeGuide(draftID)
+						return
+					}
 				}
 			}
 		}
@@ -251,4 +257,58 @@ Output ONLY the JSON object matching the schema above. Nothing else.`
 
 	fmt.Printf("Draft proposal generated.\nReasoning: Focused on minimal, read-only access to avoid Rule 1 violation.\nLaunching refinement wizard...\n")
 	fmt.Printf("Use: aegiscourt propose guide --draft %s\n", id)
+}
+
+func handleProposeGuide(draftID string) {
+	draft, err := proposal.LoadDraft(draftID)
+	if err != nil {
+		log.Printf("Failed to load draft %s: %v", draftID, err)
+		return
+	}
+
+	fmt.Println("Loaded draft:", draftID)
+	fmt.Printf("Title: %s\n", draft.Title)
+	fmt.Printf("Type: %s\n", draft.Type)
+	fmt.Printf("Motivation: %s\n", draft.Motivation)
+	// Print more fields as needed
+
+	// Simple interactive loop
+	for {
+		fmt.Print("Command (edit <field> <value>, save, quit): ")
+		var cmd string
+		fmt.Scanln(&cmd)
+		if cmd == "quit" {
+			return
+		}
+		if cmd == "save" {
+			_, err := proposal.SaveDraft(draft)
+			if err != nil {
+				log.Printf("Failed to save draft: %v", err)
+			} else {
+				fmt.Println("Draft saved.")
+			}
+			continue
+		}
+		if strings.HasPrefix(cmd, "edit ") {
+			parts := strings.SplitN(cmd, " ", 3)
+			if len(parts) < 3 {
+				fmt.Println("Usage: edit <field> <value>")
+				continue
+			}
+			field := parts[1]
+			value := parts[2]
+			switch field {
+			case "title":
+				draft.Title = value
+			case "type":
+				draft.Type = value
+			case "motivation":
+				draft.Motivation = value
+			// Add more fields
+			default:
+				fmt.Println("Unknown field")
+			}
+			draft.SetTimestamps()
+		}
+	}
 }
