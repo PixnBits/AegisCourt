@@ -388,14 +388,6 @@ Add test file `security/redteam_test.go` with:
 
 (Use mocks; real escape testing requires separate harness)
 
-Next steps after these:
-- Wire everything together in main kernel loop
-- Performance benchmarking (Court latency, RAM usage)
-- Cross-platform validation
-- v0.1 tag & OSS release prep
-```
-
-
 ### Task 24 – Wire everything together in main kernel loop
 In `pkg/kernel/kernel.go` implement the central runtime loop that ties all components together.
 
@@ -558,6 +550,8 @@ Create `docs/roadmap-phase2.md` with:
 - Full NIST agent governance mapping expansion
 
 Mark as "Phase 2 – post-v0.1"
+
+## Phase 12: Hardening, Dogfooding & Iteration (Post-v0.1 MVP)
 
 ### Task 31 – Implement basic tool approval & mediated external calls (first real tool beyond echo)
 Extend the mediated tool system to support the first non-trivial tool: a user-configured "web_search" wrapper.
@@ -891,7 +885,6 @@ Backlog items (prioritized):
 5. Community constitution amendment templates
 
 Add estimated effort (days) and dependencies.
-
 
 ## Phase 14: Scaling Toward Production Readiness & Enterprise Features (v0.2 – v0.5 Bridge)
 
@@ -1364,3 +1357,15 @@ Create/update:
 - `docs/personas-usage.md`: detailed scenarios for each of the 4 personas
 
 Add `make docs` → generate mermaid SVGs, CLI reference, etc.
+
+### Task 74 – v1.0 release planning & vision statement refresh
+Update `README.md` top section:
+
+New vision paragraph (2026–2027):
+"AegisCourt delivers OpenClaw-level agentic autonomy with Tier-0 financial-grade governance — local-first, cryptographically immutable, and self-evolving under strict constitutional control. From hobbyist laptops to regulated enterprise clusters, every change is auditable, reversible, and human-sovereign."
+
+Release plan:
+- v1.0: full zero-trust hardening, ≥95% NIST coverage, community skill sharing foundations
+- Post-v1: managed hosting options, advanced memory evolution, formal verification
+
+Add call-to-action: "Join the evolution – propose your first skill or rule amendment today."
