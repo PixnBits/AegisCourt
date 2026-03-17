@@ -36,12 +36,12 @@ func Spawn(task string, resources Resources) (SandboxID, error) {
 
 	// Stub: use runsc or gvisor
 	// For now, just exec the task
-	cmd := exec.Command("echo", task)
+	cmd := exec.Command("sh", "-c", task)
 	err = cmd.Run()
 	if err != nil {
 		return "", err
 	}
-	return SandboxID("stub-id"), nil
+	return SandboxID("exec-" + task), nil
 }
 
 func DetectPlatform() string {

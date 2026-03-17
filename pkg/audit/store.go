@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/cbergoon/merkletree"
@@ -84,6 +85,20 @@ func (s *Store) Verify() error {
 }
 
 func (s *Store) ExportJSONL(path string) error {
-	// Stub: write to file
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	for _, entry := range s.entries {
+		data, err := json.Marshal(entry)
+		if err != nil {
+			return err
+		}
+		if _, err := file.WriteString(string(data) + "\n"); err != nil {
+			return err
+		}
+	}
 	return nil
 }

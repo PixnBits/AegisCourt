@@ -192,8 +192,8 @@ func agentCmd() *cobra.Command {
 	cmd.AddCommand(&cobra.Command{
 		Use:   "run <task>",
 		Short: "Run a one-shot agent task",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Running agent task:", args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runAgent(args)
 		},
 	})
 	return cmd
@@ -262,6 +262,34 @@ func runPropose(args []string) error {
 	}
 
 	fmt.Printf("Proposal %s submitted and approved\n", proposal.ID)
+	return nil
+}
+
+func runAgent(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("task required")
+	}
+	task := args[0]
+
+	// Load config
+	path := config.DefaultConfigPath()
+	cfg, err := config.Load(path)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Create and start kernel
+	k, err := kernel.NewKernel(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create kernel: %w", err)
+	}
+	if err := k.Start(); err != nil {
+		return fmt.Errorf("failed to start kernel: %w", err)
+	}
+
+	// Run agent task
+	result := k.AgentRuntime.RunLoop(task)
+	fmt.Println("Agent result:", result)
 	return nil
 }
 

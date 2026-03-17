@@ -19,14 +19,16 @@ import (
 	jsonpatch "github.com/evanphx/json-patch"
 )
 
+type LLMRouter struct{}
+
 type Kernel struct {
 	Config          *config.Profile
 	SandboxMgr      *sandbox.Manager
-	LLMRouter       interface{} // stub
-	CourtEngine     interface{} // stub
+	LLMRouter       *LLMRouter
+	CourtEngine     *court.Engine
 	AuditStore      *audit.Store
-	AgentRuntime    interface{} // stub
-	Constitution    interface{} // stub
+	AgentRuntime    agent.AgentRunner
+	Constitution    interface{}
 	ApprovedTools   map[string]agent.Tool
 	PubKey          ed25519.PublicKey
 	StoredSignature []byte
@@ -55,10 +57,13 @@ func (k *Kernel) Start() error {
 	}
 
 	// Initialize sub-components
-	// For now, stubs
 	k.Constitution = constitution.GetRules()
-	k.CourtEngine = &court.Engine{}   // stub
-	k.AgentRuntime = &agent.Runtime{} // stub
+	k.CourtEngine = court.NewEngine()
+	k.AgentRuntime = agent.NewRuntime()
+	k.LLMRouter = &LLMRouter{} // stub
+
+	// Register approved tools
+	k.RegisterApprovedTool(&agent.WebSearchTool{})
 
 	// Register approved tools (stub)
 	// k.RegisterApprovedTool(&agent.WebSearchTool{})
@@ -88,8 +93,13 @@ func (k *Kernel) HandleProposal(p court.Proposal) error {
 	}
 
 	// Trigger CourtEngine.RunReview
-	// For now, stub: assume approved
-	fmt.Printf("Proposal %s appended to audit\n", p.ID)
+	approved, reason := k.CourtEngine.RunReview(p)
+	if !approved {
+		fmt.Printf("Proposal %s rejected: %s\n", p.ID, reason)
+		return nil // or error?
+	}
+
+	fmt.Printf("Proposal %s approved: %s\n", p.ID, reason)
 
 	// Based on mode: auto → wait for vote, etc.
 	// On approval: ApplyMutation, log success
@@ -104,11 +114,17 @@ func (k *Kernel) HandleProposal(p court.Proposal) error {
 }
 
 func (k *Kernel) MediateAction(action interface{}) (interface{}, error) {
+	actionStr := fmt.Sprintf("%v", action)
 	// Check constitution rules
+	if err := constitution.Enforce(1, actionStr); err != nil {
+		return nil, fmt.Errorf("action denied: %w", err)
+	}
 	// If allowed: proxy to sandbox / external
+	// For now, simulate
+	result := "mediated: " + actionStr
 	// Log every mediated call
-	fmt.Println("Mediating action")
-	return nil, nil
+	fmt.Println("Mediated action:", actionStr)
+	return result, nil
 }
 
 func (k *Kernel) RegisterApprovedTool(tool agent.Tool) error {

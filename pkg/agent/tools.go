@@ -1,5 +1,11 @@
 package agent
 
+import "strings"
+
+type AgentRunner interface {
+	RunLoop(task string) string
+}
+
 type Tool interface {
 	Name() string
 	Description() string
@@ -27,5 +33,27 @@ func (t *WebSearchTool) Execute(args map[string]interface{}) (string, error) {
 }
 
 type Runtime struct {
-	// stub
+	Tools map[string]Tool
+}
+
+func NewRuntime() *Runtime {
+	return &Runtime{
+		Tools: map[string]Tool{
+			"web_search": &WebSearchTool{},
+		},
+	}
+}
+
+func (r *Runtime) RunLoop(task string) string {
+	// Simple implementation: if task contains "search", use web_search
+	if strings.Contains(task, "search") {
+		if tool, ok := r.Tools["web_search"]; ok {
+			result, err := tool.Execute(map[string]interface{}{"query": task})
+			if err != nil {
+				return "Error: " + err.Error()
+			}
+			return result
+		}
+	}
+	return "Task completed: " + task
 }

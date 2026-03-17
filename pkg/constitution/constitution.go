@@ -53,6 +53,9 @@ func Enforce(ruleID int, action string) error {
 	if !rule.Enforced {
 		return nil
 	}
-	// Stub: always allow
+	// Simple check: deny if action contains "harm"
+	if strings.Contains(strings.ToLower(action), "harm") {
+		return fmt.Errorf("action violates rule %d: %s", ruleID, rule.Text)
+	}
 	return nil
 }
