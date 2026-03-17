@@ -3,31 +3,35 @@ package kernel
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
-	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/PixnBits/AegisCourt/pkg/agent"
 	"github.com/PixnBits/AegisCourt/pkg/audit"
 	"github.com/PixnBits/AegisCourt/pkg/config"
+	"github.com/PixnBits/AegisCourt/pkg/constitution"
 	"github.com/PixnBits/AegisCourt/pkg/court"
 	"github.com/PixnBits/AegisCourt/pkg/sandbox"
 	jsonpatch "github.com/evanphx/json-patch"
 )
 
-//go:embed ../../constitution/initial_rules_v0.1.md
-var constitution string
-
 type Kernel struct {
-	Config       *config.Profile
-	SandboxMgr   *sandbox.Manager
-	LLMRouter    interface{} // stub
-	CourtEngine  interface{} // stub
-	AuditStore   *audit.Store
-	AgentRuntime interface{} // stub
-	Constitution interface{} // stub	ApprovedTools map[string]Tool	mu          sync.RWMutex
-	halted       bool
+	Config          *config.Profile
+	SandboxMgr      *sandbox.Manager
+	LLMRouter       interface{} // stub
+	CourtEngine     interface{} // stub
+	AuditStore      *audit.Store
+	AgentRuntime    interface{} // stub
+	Constitution    interface{} // stub
+	ApprovedTools   map[string]agent.Tool
+	PubKey          ed25519.PublicKey
+	StoredSignature []byte
+	mu              sync.RWMutex
+	halted          bool
 }
 
 func NewKernel(cfg *config.Profile) (*Kernel, error) {
@@ -40,20 +44,62 @@ func NewKernel(cfg *config.Profile) (*Kernel, error) {
 }
 
 func (k *Kernel) Start() error {
-	// Load config, constitution, verify self-signature
+	// Bootstrap if needed
+	if err := k.Bootstrap(); err != nil {
+		return fmt.Errorf("bootstrap failed: %w", err)
+	}
+
+	// Verify self
+	if err := k.VerifySelf(); err != nil {
+		return fmt.Errorf("self-verification failed: %w", err)
+	}
+
 	// Initialize sub-components
-	// Start background goroutines
-	// Enter main listen loop
-	fmt.Println("Kernel started")
+	// For now, stubs
+	k.Constitution = constitution.GetRules()
+	k.CourtEngine = &court.Engine{}   // stub
+	k.AgentRuntime = &agent.Runtime{} // stub
+
+	// Register approved tools (stub)
+	// k.RegisterApprovedTool(&agent.WebSearchTool{})
+
+	// Start background goroutines if needed
+	// For now, just print
+	fmt.Println("Kernel started successfully")
 	return nil
 }
 
 func (k *Kernel) HandleProposal(p court.Proposal) error {
+	// Create audit entry
+	payload, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("failed to marshal proposal: %w", err)
+	}
+	entry := audit.AuditEntry{
+		ID:        p.ID,
+		Timestamp: time.Now(),
+		Payload:   payload,
+		// PrevHash, Signature, Proof will be set by Append
+	}
+
 	// Append to audit
+	if err := k.AuditStore.Append(entry); err != nil {
+		return fmt.Errorf("failed to append to audit: %w", err)
+	}
+
 	// Trigger CourtEngine.RunReview
+	// For now, stub: assume approved
+	fmt.Printf("Proposal %s appended to audit\n", p.ID)
+
 	// Based on mode: auto → wait for vote, etc.
 	// On approval: ApplyMutation, log success
-	fmt.Println("Handling proposal:", p.ID)
+	// Stub: always approve
+	if p.Diff != nil {
+		if err := k.ApplyMutation(p.Diff); err != nil {
+			return fmt.Errorf("failed to apply mutation: %w", err)
+		}
+	}
+	fmt.Printf("Proposal %s approved and applied\n", p.ID)
 	return nil
 }
 
@@ -89,6 +135,9 @@ func (k *Kernel) Bootstrap() error {
 	// Sign the hash
 	signature := ed25519.Sign(priv, hash[:])
 
+	// Store signature
+	k.StoredSignature = signature
+
 	// Store signature and pubkey hash (placeholder: print for now)
 	pubHash := sha256.Sum256(pub)
 	fmt.Printf("Kernel bootstrapped. PubKey hash: %x, Signature: %x\n", pubHash, signature)
@@ -105,10 +154,8 @@ func (k *Kernel) VerifySelf() error {
 	}
 	hash := sha256.Sum256(binData)
 
-	// Placeholder: assume signature is stored, but for now, skip verification
-	// In real, load stored signature and pubkey, verify
-	if !ed25519.Verify(k.PubKey, hash[:], []byte("placeholder")) {
-		panic("Self-signature verification failed")
+	if !ed25519.Verify(k.PubKey, hash[:], k.StoredSignature) {
+		return fmt.Errorf("self-signature verification failed")
 	}
 	return nil
 }

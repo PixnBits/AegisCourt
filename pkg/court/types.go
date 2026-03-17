@@ -1,18 +1,21 @@
 package court
-package court
 
 import (
 	"time"
 
-	"github.com/evanphx/json-patch"
+	jsonpatch "github.com/evanphx/json-patch"
 )
 
+type Proposal struct {
+	ID          string
+	Type        string
+	Name        string
+	Description string
+	Diff        jsonpatch.Patch
+	CreatedAt   time.Time
+	Status      string
+}
 
-
-
-
-
-
-
-
-}	CreatedAt   time.Time	Status      string	Diff        jsonpatch.Patch	Description string	Name        string	Type        string	ID          stringtype Proposal struct {
+type Engine struct {
+	// stub
+}

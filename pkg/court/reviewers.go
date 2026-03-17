@@ -5,22 +5,22 @@ import (
 	"fmt"
 )
 
-//go:embed ../../internal/reviewers/ciso.md
+//go:embed ciso.md
 var cisoPrompt string
 
-//go:embed ../../internal/reviewers/mrm.md
+//go:embed mrm.md
 var mrmPrompt string
 
-//go:embed ../../internal/reviewers/compliance-regulatory.md
+//go:embed compliance-regulatory.md
 var compliancePrompt string
 
-//go:embed ../../internal/reviewers/responsible-ai.md
+//go:embed responsible-ai.md
 var responsibleAIPrompt string
 
-//go:embed ../../internal/reviewers/sre.md
+//go:embed sre.md
 var srePrompt string
 
-//go:embed ../../internal/reviewers/helpfulness-evolution.md
+//go:embed helpfulness-evolution.md
 var helpfulnessPrompt string
 
 func LoadReviewerPrompt(persona string) (string, error) {

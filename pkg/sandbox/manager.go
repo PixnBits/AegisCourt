@@ -15,6 +15,10 @@ type Resources struct {
 
 type SandboxID string
 
+type Manager struct {
+	// stub
+}
+
 func Spawn(task string, resources Resources) (SandboxID, error) {
 	// Detect RAM
 	vmem, err := mem.VirtualMemory()
@@ -37,7 +41,7 @@ func Spawn(task string, resources Resources) (SandboxID, error) {
 	if err != nil {
 		return "", err
 	}
-	return "stub-id", nil
+	return SandboxID("stub-id"), nil
 }
 
 func DetectPlatform() string {

@@ -1,59 +1,58 @@
 package constitution
 
+import (
+	_ "embed"
+	"fmt"
+	"strings"
+)
 
+//go:embed initial_rules_v0.1.md
+var rulesMarkdown string
 
+type Rule struct {
+	ID       int
+	Text     string
+	Priority string
+	Enforced bool
+}
 
+var rules map[int]Rule
 
+func init() {
+	rules = parseRules(rulesMarkdown)
+}
 
+func parseRules(md string) map[int]Rule {
+	r := make(map[int]Rule)
+	lines := strings.Split(md, "\n")
+	id := 1
+	for _, line := range lines {
+		// Parse rule
+		if strings.HasPrefix(line, "**Rule") {
+			r[id] = Rule{
+				ID:       id,
+				Text:     line,
+				Priority: "High", // placeholder
+				Enforced: true,
+			}
+			id++
+		}
+	}
+	return r
+}
 
+func GetRules() map[int]Rule {
+	return rules
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}	return rulesfunc GetRules() map[int]Rule {}	return nil	// Stub: always allow	}		return nil	if !rule.Enforced {	}		return fmt.Errorf("rule %d not found", ruleID)	if !ok {	rule, ok := rules[ruleID]func Enforce(ruleID int, action string) error {}	return r	}		}			id++			}				Enforced: true,				Text:     line,				Priority: "High", // placeholder				ID:       id,			r[id] = Rule{			// Parse rule		if strings.HasPrefix(line, "**Rule") {	for _, line := range lines {	id := 1	lines := strings.Split(md, "\n")	r := make(map[int]Rule)func parseRules(md string) map[int]Rule {}	rules = parseRules(rulesMarkdown)func init() {var rules map[int]Rule}	Enforced bool	Text     string	Priority string	ID       inttype Rule struct {var rulesMarkdown string//go:embed ../../constitution/initial_rules_v0.1.md)	"strings"	"fmt"	_ "embed"import (package constitution
+func Enforce(ruleID int, action string) error {
+	rule, ok := rules[ruleID]
+	if !ok {
+		return fmt.Errorf("rule %d not found", ruleID)
+	}
+	if !rule.Enforced {
+		return nil
+	}
+	// Stub: always allow
+	return nil
+}
