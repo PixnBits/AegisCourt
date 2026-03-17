@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"AegisCourt/audit"
 	"AegisCourt/llm"
@@ -168,7 +169,16 @@ func main() {
 					return
 				}
 			}
-		case "propose":
+		case "utc":
+			fmt.Println(time.Now().UTC().Format(time.RFC3339))
+			return
+		case "benchmark":
+			if len(os.Args) > 2 && os.Args[2] == "llm" {
+				handleBenchmarkLLM()
+			} else {
+				fmt.Println("Usage: benchmark llm")
+			}
+			return
 			if len(os.Args) > 2 {
 				switch os.Args[2] {
 				case "agent-help":
@@ -380,4 +390,15 @@ func handleCourtRollback(proposalID string) {
 	if err := court.RollbackProposal(proposalID); err != nil {
 		log.Printf("Failed to rollback proposal: %v", err)
 	}
+}
+
+func handleBenchmarkLLM() {
+	start := time.Now()
+	_, err := llm.CallLLM("Hello, how are you?", "")
+	duration := time.Since(start)
+	if err != nil {
+		log.Printf("Benchmark failed: %v", err)
+		return
+	}
+	fmt.Printf("LLM call took %v\n", duration)
 }
