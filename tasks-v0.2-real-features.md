@@ -14,6 +14,16 @@ Everything here must ship complete and usable by a single user in Hobbyist Auto 
    - Panic if signature invalid  
    - Store root public key in embedded constant
 
+1a. Resource detection & LLM recommendation logic (onboarding & start)
+    - Query available RAM (gopsutil or runtime.MemStats)
+    - Optional: GPU VRAM detection (nvidia-smi parse or go-nvml)
+    - Estimate Court peak usage: base + per-reviewer margin
+    - In init wizard: show resources, warn if nemotron + full Court risky
+    - Suggest llama3.2 fallback or --low-resource (sequential reviewers)
+    - Never reduce reviewer count — full 6 always used
+    - Save config.low_resource_mode if selected
+    - Log resource check + choice in audit trail
+
 2. Implement append-only Merkle-signed audit log  
    - Each entry: UUIDv7, timestamp, prev hash, payload hash, signature  
    - `audit verify` command recomputes chain & reports tampering

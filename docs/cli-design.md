@@ -29,6 +29,8 @@ aegiscourt [global flags] <subcommand> [args]
 - `--confirm` / `-y`       Bypass interactive confirmation prompts (dangerous; always audited)
 - `--mode-info`            Show current Court mode + review implications for this session
 - `--help` / `-h`          Show help (rich per-subcommand help + examples)
+- `--low-resource`         Force sequential reviewer execution (full court, but one at a time)
+                           Use if RAM constrained; preserves full Court quality
 
 ## 3. Subcommands by Category
 

@@ -53,12 +53,14 @@ Acceptance:
 
 #### 5.3 First-Run Onboarding Flow
 1. Binary launch → paranoid welcome
-2. LLM selector: **default/recommended: nemotron-3-nano** (latest quantized variant, e.g. FP8/BF16 via Ollama) — superior instruction following, structured JSON output, reasoning for Court reviewers & proposal assist.
+2. Resource detection (RAM/GPU) + LLM selector:
+   - Default/recommended: nemotron-3-nano (latest quantized variant, e.g. FP8/BF16 via Ollama) — superior instruction following, structured JSON output, reasoning for Court reviewers & proposal assist.
    - Strong fallback: llama3.2:3b-instruct (lightweight/fast)
-   - Guidance shown: "Nemotron-3-Nano family excels at reliable structured outputs needed for reviewers and guided proposals."
+   - Guidance shown: resource estimate + warning if nemotron + full Court likely to strain system
+   - Never reduce reviewer count; offer sequential execution (--low-resource mode) if needed
 3. About Me wizard (risk sliders, use-cases, persona → court.mode calibration)
 4. Kernel bootstrap + self-signature
-5. Demo proposal (e.g. add echo skill) → live Court + optional guided refinement demo
+5. Demo proposal (e.g. add echo skill) → live Court (full 6 reviewers) + optional guided refinement demo
 
 #### 5.4 Governance Court Modes & Human Review Requirements
 All modes single-user in v0.2 (no multi-person signoff).
