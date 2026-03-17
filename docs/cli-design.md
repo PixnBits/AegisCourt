@@ -192,6 +192,7 @@ aegiscourt log list --filter 0007
 - Logging: Every mutating command → signed audit entry
 - Help: rich `--help` per subcommand with examples
 - Error codes: Exit 1 + descriptive message + constitution rule reference
+- Drafts and proposals conform to `pkg/proposal/schema.json`
 
 ## 6. Future Evolution (Phase 3+)
 - TUI / web UI wrapper

@@ -95,6 +95,29 @@ Draft refined and saved as ~/.aegiscourt/proposals/draft-20260317T0123.json
 Ready to submit? Use: propose submit draft-20260317T0123
 ```
 
+#### Example
+For input: "add a safe way to get current UTC time without full web access"
+
+```json
+{
+  "type": "add-tool",
+  "title": "Add mediated UTC time tool (kernel clock only)",
+  "motivation": "Agent frequently needs current time for scheduling/reminders but open web_search risks unnecessary network exposure and Rule 1 violations.",
+  "proposed_change": "New tool: utc_time\nParameters: none\nOutput: ISO8601 UTC string (e.g. 2026-03-17T12:05:00Z)\nImplemented via kernel clock proxy, no network allowed.",
+  "expected_impact": {
+    "success_gain_percent": 20,
+    "resource_delta": "negligible",
+    "other_benefits": ["Reduces reliance on external APIs", "Faster response time"]
+  },
+  "risk_level": "low",
+  "risks_and_mitigations": ["Risk of clock API abuse → mitigated by read-only proxy and output cap"],
+  "rollback_plan": "Remove tool registration from agent config; revert kernel mediation diff.",
+  "validation_plan": "Run 5 time-sensitive scheduling tasks before/after; compare success rate and latency.",
+  "constitution_check": "Uses kernel-mediated read-only access, no host write or network → fully preserves Rules 1, 2, and 3.",
+  "llm_assist_used": "full"
+}
+```
+
 ### 5. Review the draft (optional)
 ```bash
 aegiscourt court view --draft 20260317T0123

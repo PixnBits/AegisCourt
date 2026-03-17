@@ -82,6 +82,21 @@ Everything here must ship complete and usable by a single user in Hobbyist Auto 
     - Fields: id, type, title, motivation, change (diff/text), impact, risks, rollback, validation, llm_assist_level, etc.  
     - Save/load from `~/.aegiscourt/proposals/draft-<uuid>.json`
 
+10a. Proposal / Draft schema definition & enforcement
+    - Create `pkg/proposal/schema.json` (JSON Schema Draft 2020-12)
+    - Define matching Go struct in `pkg/proposal/types.go`
+    - Implement validation function: load schema → validate JSON at wizard save & submit
+    - Add unit tests: valid draft passes, missing required field fails, invalid enum fails
+    - Update propose agent-help prompt to include schema reference or excerpt
+    - Log schema violations in audit trail + user-friendly error in CLI
+
+10b. Agent-help prompt template with schema enforcement
+    - Create prompts/propose-agent-help.md with full template including schema excerpt
+    - Implement handler: substitute user request → call LLM → parse JSON → validate against schema
+    - Add retry logic on schema violation (append error to prompt, retry once)
+    - Unit test: valid request → compliant JSON, vague request → highlights risks, invalid output → retry or fail gracefully
+    - Audit log entry: "agent-help draft generated" with success/failure
+
 11. `propose agent-help "<short desc>"`  
     - Prompt primary LLM to generate draft JSON + reasoning  
     - Auto-launch `propose guide --draft <uuid>`

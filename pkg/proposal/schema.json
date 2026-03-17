@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AegisCourt Proposal / Draft Schema",
+  "description": "Structure for user/agent-generated proposals and drafts. Enforced at creation, refinement, and submission.",
+  "type": "object",
+  "required": [
+    "type",
+    "title",
+    "motivation",
+    "proposed_change",
+    "rollback_plan"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "UUIDv7 or timestamp-based identifier for this draft/proposal",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^draft-[0-9]{8}T[0-9]{6}$"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "add-tool",
+        "add-skill",
+        "change-prompt",
+        "amend-rule",
+        "upgrade-memory",
+        "other"
+      ],
+      "description": "Category of change being proposed"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 140,
+      "description": "Short, clear title (used in Court view)"
+    },
+    "motivation": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 1000,
+      "description": "Why this change is needed — observed problems, repeated failures, benchmarks"
+    },
+    "proposed_change": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 10,
+          "description": "Free-text description, prompt patch, rule text, or code diff"
+        },
+        {
+          "type": "object",
+          "description": "Structured change (e.g. JSON Patch, tool schema)",
+          "additionalProperties": true
+        }
+      ]
+    },
+    "expected_impact": {
+      "type": "object",
+      "properties": {
+        "success_gain_percent": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": 100,
+          "description": "Estimated % improvement in task success rate"
+        },
+        "resource_delta": {
+          "type": "string",
+          "description": "RAM/CPU/network impact estimate (e.g. '+200 MB RAM', 'negligible')"
+        },
+        "other_benefits": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Additional qualitative benefits"
+        }
+      },
+      "additionalProperties": false
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "Self-assessed risk tier"
+    },
+    "risks_and_mitigations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Identified risks and how the proposal addresses them"
+    },
+    "rollback_plan": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Explicit, step-by-step revert instructions"
+    },
+    "validation_plan": {
+      "type": "string",
+      "description": "How to measure before/after (benchmarks, canned tasks, manual checks)"
+    },
+    "constitution_check": {
+      "type": "string",
+      "description": "Explicit explanation of how this preserves Rules 1–5"
+    },
+    "llm_assist_used": {
+      "type": "string",
+      "enum": ["none", "light", "full"],
+      "description": "Level of LLM assistance used in drafting/refinement"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 timestamp of draft creation"
+    },
+    "last_modified_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last time the draft was edited in wizard"
+    }
+  },
+  "additionalProperties": false
+}
