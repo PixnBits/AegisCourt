@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"AegisCourt/audit"
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
@@ -104,7 +105,25 @@ func DetectResources() Resources {
 
 func main() {
 	verifySelfSignature()
+
+	if len(os.Args) > 2 && os.Args[1] == "audit" && os.Args[2] == "verify" {
+		intact, errs := audit.Verify()
+		if intact {
+			fmt.Println("Audit log is intact")
+		} else {
+			fmt.Println("Audit log is compromised:")
+			for _, err := range errs {
+				fmt.Println(err)
+			}
+		}
+		return
+	}
+
 	resources := DetectResources()
 	log.Printf("Resources: %+v", resources)
-	// TODO: log to audit
+
+	// Log to audit
+	if err := audit.Append(resources); err != nil {
+		log.Printf("Failed to append to audit: %v", err)
+	}
 }
