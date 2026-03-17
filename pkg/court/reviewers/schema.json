@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "AegisCourt Reviewer Output Schema",
+  "description": "Exact structure every reviewer persona MUST output. Enforced in prompts and validated in code.",
+  "type": "object",
+  "required": ["score", "recommendation", "key_concerns", "required_mitigations", "pros", "cons", "rationale"],
+  "properties": {
+    "score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "0–100 risk-adjusted score. <60 = high risk, 60–79 = medium, ≥80 = low"
+    },
+    "recommendation": {
+      "type": "string",
+      "enum": ["Approve", "Approve with conditions", "Defer", "Reject"],
+      "description": "Final stance of this reviewer"
+    },
+    "key_concerns": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 0,
+      "maxItems": 5,
+      "description": "0–5 concise, security/ethics/etc.-specific concerns"
+    },
+    "required_mitigations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 0,
+      "maxItems": 5,
+      "description": "0–5 specific, enforceable mitigations required for approval"
+    },
+    "pros": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Positive aspects from this reviewer's perspective"
+    },
+    "cons": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Negative aspects / drawbacks"
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 300,
+      "description": "1–2 sentence summary of reasoning"
+    }
+  },
+  "additionalProperties": false
+}

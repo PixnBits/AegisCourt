@@ -83,6 +83,9 @@ Human sign-offs (in Assisted/Hybrid/Manual modes) flow through the same mediated
 ### ADR-006: Governance Court Modes & Human-in-the-Loop Variability
 **Decision:** The Governance Court Engine supports four operational modes (Hobbyist Auto, Indie Assisted, Team Hybrid, Enterprise Manual), selected via About Me profile / config.
 
+### ADR-011: Reviewer Output Schema
+**Decision:** The single source of truth is in `pkg/court/reviewers/schema.json`.
+
 **Rationale:**
 - Enables graduated trust: fast automated flow for hobbyists; structured human oversight for enterprises.
 - Preserves security invariants — all modes require proposal logging, reversibility, and kernel mediation.

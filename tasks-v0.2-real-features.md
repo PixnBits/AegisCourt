@@ -49,6 +49,13 @@ Everything here must ship complete and usable by a single user in Hobbyist Auto 
 6. Load reviewer personas from embedded .md files (CISO, MRM, Compliance, Ethics, SRE, Helpfulness)  
    - Each has strict JSON output schema (score, concerns, pros, cons, mitigations, recommendation)
 
+6a. Define & embed reviewer output schema + persona prompts
+    - Create pkg/court/reviewers/schema.json (JSON Schema as single source of truth)
+    - Implement Go struct matching the schema + validation function (use gojsonschema or manual)
+    - Embed or load all 6 reviewer prompts (ciso.md, mrm.md, compliance.md, responsible-ai.md, sre.md, helpfulness.md)
+    - Add unit tests: valid JSON passes, missing field fails, extra field fails, invalid enum fails
+    - Log schema violation as audit entry + retry reviewer or mark proposal as malformed
+
 7. Court orchestration  
    - Parallel LLM calls to reviewers (or sequential on low RAM)  
    - Weighted aggregate score (configurable per mode)  
