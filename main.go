@@ -144,6 +144,11 @@ func main() {
 					return
 				case "view":
 					if len(os.Args) > 3 {
+						if os.Args[3] == "--help" {
+							fmt.Println("Usage: court view <proposal-id>")
+							fmt.Println("View the Governance Court results for the specified proposal.")
+							return
+						}
 						proposalID := os.Args[3]
 						handleCourtView(proposalID)
 					} else {
@@ -152,6 +157,11 @@ func main() {
 					return
 				case "run":
 					if len(os.Args) > 3 {
+						if os.Args[3] == "--help" {
+							fmt.Println("Usage: court run <proposal-id>")
+							fmt.Println("Run the Governance Court on the specified proposal.")
+							return
+						}
 						proposalID := os.Args[3]
 						handleCourtRun(proposalID)
 					} else {
@@ -160,6 +170,11 @@ func main() {
 					return
 				case "apply":
 					if len(os.Args) > 3 {
+						if os.Args[3] == "--help" {
+							fmt.Println("Usage: court apply <proposal-id>")
+							fmt.Println("Apply the approved proposal changes.")
+							return
+						}
 						proposalID := os.Args[3]
 						handleCourtApply(proposalID)
 					} else {
@@ -168,6 +183,11 @@ func main() {
 					return
 				case "rollback":
 					if len(os.Args) > 3 {
+						if os.Args[3] == "--help" {
+							fmt.Println("Usage: court rollback <proposal-id>")
+							fmt.Println("Rollback the applied proposal changes.")
+							return
+						}
 						proposalID := os.Args[3]
 						handleCourtRollback(proposalID)
 					} else {
@@ -180,18 +200,37 @@ func main() {
 			fmt.Println(time.Now().UTC().Format(time.RFC3339))
 			return
 		case "agent":
-			if len(os.Args) > 2 && os.Args[2] == "run" && len(os.Args) > 3 {
-				task := strings.Join(os.Args[3:], " ")
-				handleAgentRun(task)
-				return
+			if len(os.Args) > 2 {
+				if os.Args[2] == "--help" {
+					fmt.Println("Agent Commands:")
+					fmt.Println("  agent run <task>          Run agent on a task")
+					return
+				}
+				if os.Args[2] == "run" && len(os.Args) > 3 {
+					if os.Args[3] == "--help" {
+						fmt.Println("Usage: agent run <task>")
+						fmt.Println("Run the agent on the specified task.")
+						return
+					}
+					task := strings.Join(os.Args[3:], " ")
+					handleAgentRun(task)
+					return
+				}
 			}
 			fallthrough
 		case "benchmark":
-			if len(os.Args) > 2 && os.Args[2] == "llm" {
-				handleBenchmarkLLM()
-			} else {
-				fmt.Println("Usage: benchmark llm")
+			if len(os.Args) > 2 {
+				if os.Args[2] == "--help" {
+					fmt.Println("Benchmark Commands:")
+					fmt.Println("  benchmark llm             Benchmark LLM response time")
+					return
+				}
+				if os.Args[2] == "llm" {
+					handleBenchmarkLLM()
+					return
+				}
 			}
+			fmt.Println("Usage: benchmark llm")
 			return
 		case "status":
 			handleStatus()
@@ -204,16 +243,33 @@ func main() {
 					return
 				case "agent-help":
 					if len(os.Args) > 3 {
+						if os.Args[3] == "--help" {
+							fmt.Println("Usage: propose agent-help <request>")
+							fmt.Println("Generate a proposal draft using AI assistance.")
+							return
+						}
 						request := strings.Join(os.Args[3:], " ")
 						handleProposeAgentHelp(request)
 						return
+					} else {
+						fmt.Println("Usage: propose agent-help <request>")
 					}
+					return
 				case "guide":
-					if len(os.Args) > 4 && os.Args[3] == "--draft" {
-						draftID := os.Args[4]
-						handleProposeGuide(draftID)
-						return
+					if len(os.Args) > 3 {
+						if os.Args[3] == "--help" {
+							fmt.Println("Usage: propose guide --draft <draft-id>")
+							fmt.Println("Interactive wizard to refine a proposal draft.")
+							return
+						}
+						if len(os.Args) > 4 && os.Args[3] == "--draft" {
+							draftID := os.Args[4]
+							handleProposeGuide(draftID)
+							return
+						}
 					}
+					fmt.Println("Usage: propose guide --draft <draft-id>")
+					return
 				}
 			}
 		}
