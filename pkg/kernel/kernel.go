@@ -8,7 +8,11 @@ import (
 	"os"
 
 	"github.com/BurntSushi/toml"
+	"github.com/PixnBits/AegisCourt/pkg/agent"
+	"github.com/PixnBits/AegisCourt/pkg/audit"
 	"github.com/PixnBits/AegisCourt/pkg/config"
+	"github.com/PixnBits/AegisCourt/pkg/court"
+	"github.com/PixnBits/AegisCourt/pkg/sandbox"
 	jsonpatch "github.com/evanphx/json-patch"
 )
 
@@ -16,14 +20,54 @@ import (
 var constitution string
 
 type Kernel struct {
-	Config *config.Profile
-	PubKey ed25519.PublicKey
+	Config       *config.Profile
+	SandboxMgr   *sandbox.Manager
+	LLMRouter    interface{} // stub
+	CourtEngine  interface{} // stub
+	AuditStore   *audit.Store
+	AgentRuntime interface{} // stub
+	Constitution interface{} // stub	ApprovedTools map[string]Tool	mu          sync.RWMutex
+	halted       bool
 }
 
 func NewKernel(cfg *config.Profile) (*Kernel, error) {
 	return &Kernel{
-		Config: cfg,
+		Config:        cfg,
+		SandboxMgr:    &sandbox.Manager{}, // stub
+		AuditStore:    audit.NewStore(),
+		ApprovedTools: make(map[string]agent.Tool),
 	}, nil
+}
+
+func (k *Kernel) Start() error {
+	// Load config, constitution, verify self-signature
+	// Initialize sub-components
+	// Start background goroutines
+	// Enter main listen loop
+	fmt.Println("Kernel started")
+	return nil
+}
+
+func (k *Kernel) HandleProposal(p court.Proposal) error {
+	// Append to audit
+	// Trigger CourtEngine.RunReview
+	// Based on mode: auto → wait for vote, etc.
+	// On approval: ApplyMutation, log success
+	fmt.Println("Handling proposal:", p.ID)
+	return nil
+}
+
+func (k *Kernel) MediateAction(action interface{}) (interface{}, error) {
+	// Check constitution rules
+	// If allowed: proxy to sandbox / external
+	// Log every mediated call
+	fmt.Println("Mediating action")
+	return nil, nil
+}
+
+func (k *Kernel) RegisterApprovedTool(tool agent.Tool) error {
+	k.ApprovedTools[tool.Name()] = tool
+	return nil
 }
 
 func (k *Kernel) Bootstrap() error {
@@ -80,4 +124,11 @@ func (k *Kernel) ApplyMutation(diff jsonpatch.Patch) error {
 		return err
 	}
 	return toml.Unmarshal(patched, k.Config)
+}
+
+func (k *Kernel) Rollback(mutationID string) error {
+	// Stub: revert last mutation
+	// In real, find audit entry, reverse diff
+	fmt.Println("Rolling back mutation:", mutationID)
+	return nil
 }

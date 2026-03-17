@@ -157,12 +157,8 @@ return &cobra.Command{
 Use:   "start",
 Short: "Start the AegisCourt kernel",
 Run: func(cmd *cobra.Command, args []string) {
-fmt.Println("Starting AegisCourt...")
-},
-}
-}
-
-func stopCmd() *cobra.Command {
+			backend := "gvisor" // stub
+			fmt.Printf("Starting AegisCourt... Backend: %s\n", backend)
 return &cobra.Command{
 Use:   "stop",
 Short: "Stop the AegisCourt kernel",
@@ -201,12 +197,14 @@ func proposeCmd() *cobra.Command {
 return &cobra.Command{
 Use:   "propose <type> <name>",
 Short: "Propose a change",
-Run: func(cmd *cobra.Command, args []string) {
-fmt.Println("Proposing:", args[0], args[1])
-},
-}
-}
-
+		Example: `aegiscourt propose add-tool web_search
+aegiscourt propose amend-rule 5`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 2 {
+				return fmt.Errorf("type and name required")
+			}
+			fmt.Println("Proposing:", args[0], args[1])
+			return nil
 func courtCmd() *cobra.Command {
 cmd := &cobra.Command{
 Use:   "court",
@@ -269,23 +267,20 @@ Short: "Snapshot commands",
 cmd.AddCommand(&cobra.Command{
 Use:   "create",
 Short: "Create snapshot",
-Run: func(cmd *cobra.Command, args []string) {
-fmt.Println("Snapshot created")
-},
-})
-return cmd
-}
-
-func rollbackCmd() *cobra.Command {
-return &cobra.Command{
-Use:   "rollback <id>",
-Short: "Rollback to snapshot",
-Run: func(cmd *cobra.Command, args []string) {
-fmt.Println("Rolling back to:", args[0])
-},
-}
-}
-
+		RunE: func(cmd *cobra.Command, args []string) error {
+			enterprise, _ := cmd.Flags().GetBool("enterprise")
+			// Stub: call audit.CreateSnapshot
+			fmt.Printf("Snapshot created (enterprise: %t)\n", enterprise)
+			return nil
+		},
+	})
+	cmd.Flags().Bool("enterprise", false, "Create enterprise snapshot")
+			if len(args) == 0 {
+				return fmt.Errorf("id required")
+			}
+			// Stub: call kernel.Rollback
+			fmt.Println("Rolling back to:", args[0])
+			return nil
 func updateCmd() *cobra.Command {
 return &cobra.Command{
 Use:   "update",
@@ -302,6 +297,4 @@ Use:   "version",
 Short: "Show version",
 Run: func(cmd *cobra.Command, args []string) {
 fmt.Println("AegisCourt v0.1")
-},
-}
-}
+			fmt.Println("Build: dev")

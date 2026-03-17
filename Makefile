@@ -20,3 +20,6 @@ cross-build:
 	GOOS=linux GOARCH=amd64 go build -o bin/aegiscourt-linux-amd64 ./cmd/aegiscourt
 	GOOS=darwin GOARCH=arm64 go build -o bin/aegiscourt-darwin-arm64 ./cmd/aegiscourt
 	GOOS=windows GOARCH=amd64 go build -o bin/aegiscourt-windows-amd64.exe ./cmd/aegiscourt
+
+bench:
+	go test -bench=. -benchmem ./benchmarks/...
