@@ -1,18 +1,19 @@
 # AegisCourt CLI Design & Specification
-**Version:** 0.1-draft  
-**Status:** Proposed
+**Version:** 0.2-draft  
+**Status:** Active (v0.2 scope – real features only, single-user)  
 **Goal:** Define a secure, minimalist, Unix-inspired CLI that serves as the primary (and initially only) operator interface for AegisCourt. This document lives alongside PRD.md §5.4 and will evolve via Court-approved changes.
 
 ## 1. Design Principles
 - Unix / git / docker / kubectl style: `aegiscourt <subcommand> [args]`
 - Paranoid-by-default: confirmations for mutations, verbose risk messaging, full audit logging
-- Progressive disclosure: simple defaults for hobbyists; flags and deep subcommands for enterprise / scripting
+- Progressive disclosure: simple defaults for hobbyists; flags and deep subcommands for advanced use
 - Mode-aware behavior: output, prompts, and confirmation requirements adapt to active Court mode (set during onboarding or via config)
 - Human-first output: readable tables/lists by default; `--json` for automation
 - Errors reference constitution rules (e.g. "Blocked: Rule 3 – Unauthorized host access")
 - Every state-changing command emits signed audit entry
 - Lightweight: <1s startup, no heavy runtime deps beyond kernel
 - Cross-platform: Linux primary (gVisor), macOS/Windows via seccomp / Docker fallback
+- v0.2 limitation: All modes are single-user. No multi-person / multi-domain signoff yet.
 
 ## 2. Root Command & Global Flags
 
@@ -26,31 +27,36 @@ aegiscourt [global flags] <subcommand> [args]
 - `--dry-run`              Simulate command without applying changes or writing audit log
 - `--profile <path>`       Override About Me config file
 - `--confirm` / `-y`       Bypass interactive confirmation prompts (dangerous; always audited)
-- `--mode-info`           Show current Court mode + human review implications for this session
+- `--mode-info`            Show current Court mode + review implications for this session
 - `--help` / `-h`          Show help (rich per-subcommand help + examples)
 
 ## 3. Subcommands by Category
 
 ### 3.1 Setup & Configuration
+
 - `init`  
   Interactive first-run wizard: kernel bootstrap, LLM selection, About Me profile  
   Flags:
     - `--llm <ollama|openai|anthropic|grok|...>`
     - `--profile-template <hobbyist|indie|enterprise|financial>`  
-    - `--court-mode <auto|assisted|hybrid|manual>` (overrides wizard default; hobbyist auto if omitted)
+    - `--court-mode <auto|assisted|hybrid|manual>` (overrides wizard default; hobbyist auto if omitted)  
+  LLM guidance in wizard:  
+  Default suggestion: **nemotron-3-nano** (latest quantized variant, e.g. FP8/BF16 via Ollama) — chosen for superior instruction following, structured JSON output, and reasoning reliability in Court reviewers and proposal assistance.  
+  Strong fallback: **llama3.2:3b-instruct** (fast/lightweight on low RAM).  
   Output: signed kernel hash, setup summary
 
 - `config get <key>`  
   `config set <key> <value>`  
   `config list`  
   View / edit runtime configuration (LLM endpoint, risk sliders, etc.)  
-  Sensitive changes route through Court
+  Sensitive changes route through Court  
   Keys supported:
    - `court.mode`                (auto|assisted|hybrid|manual)
-   - `court.pending_human_signoffs` (read-only view of outstanding approvals)
-  Changing `court.mode` to a stricter level (e.g. auto → manual) requires Court proposal & approval.
+   - `court.pending_human_review` (read-only view of outstanding user votes in stricter modes)
+   - `preferred_llm`             (e.g. "nemotron-3-nano:latest")
 
 ### 3.2 Runtime Control
+
 - `start [--detached] [--resources <ram=4GB,cpu=2>] [--sandbox <gvisor|seccomp>]`  
   Launch kernel + agent runtime
 
@@ -65,60 +71,83 @@ aegiscourt [global flags] <subcommand> [args]
   Emergency: freeze all agents, rollback last mutation, enter read-only mode
 
 ### 3.3 Governance & Evolution
+
 - `propose <type> <name>`  
-  Submit self-modification proposal  
-  Types: `add-tool`, `add-skill`, `change-prompt`, `amend-rule`, `add-reviewer`, etc.  
+  Submit self-modification proposal (low-level / direct)  
+  Types: `add-tool`, `add-skill`, `change-prompt`, `amend-rule`, etc.  
   Flags: `--description <text>`, `--diff-file <path>`, `--impact-assessment <text>`, `--benchmark-plan <text>`  
   Output: Proposal ID, immediate Court start notification
 
+- `propose guide`  
+  Interactive step-by-step wizard to build a high-quality proposal aligned with the constitution.  
+  Steps include:
+  - Select proposal type
+  - Describe observed problem/motivation
+  - Define concrete proposed change (multi-line editor)
+  - Self-assess impact, risks, preservation of Rules 1–5
+  - Provide rollback plan
+  - Outline validation/benchmark plan
+  - Optional LLM-assisted refinement (light/full levels)  
+  On completion: saves draft JSON in `~/.aegiscourt/proposals/draft-<uuid>.json`  
+  Flags:
+    - `--type <type>`               Pre-select type
+    - `--editor <vim|nano|code>`    Override default editor
+    - `--llm-assist <none|light|full>`  LLM help level (default: light)
+    - `--from-recent-logs`          Suggest motivation from recent agent failures
+
+  Example:
+  ```bash
+  aegiscourt propose guide --type add-tool --llm-assist light
+  # → Wizard starts → draft saved
+  ```
+
+- `propose agent-help "<short request>"`  
+  Uses the main agent to generate an initial proposal draft from a brief description.  
+  Automatically launches `propose guide` on the resulting draft for user refinement.  
+  Example:
+  ```bash
+  aegiscourt propose agent-help "add a mediated way to query current UTC time without full web access"
+  ```
+
+- `propose submit <draft-uuid>`  
+  Submit a finalized draft proposal created via guide/agent-help.  
+  Triggers normal Court review flow.
+
 - `court list [--status <pending|active|completed|deferred>]`  
-  List proposals and their current status
-  Additions in output table:
-    - Column: Mode
-    - Column: Human Review Status (None / Pending / Partial / Complete)
+  List proposals and their current status  
+  Columns include: Mode, Human Review Status (None / Pending User Vote / Complete)
 
 - `court view <proposal-id>`  
-  Show full Governance Court output: reviewer JSONs, pros/cons, scores, NASA-style board, aggregate recommendation
-  - Display current Court mode at top
-  - Human review section:
-    - In Hobbyist Auto: "No mandatory human review – your vote is final."
-    - In Indie Assisted: "Review reports below; single-user approval required."
-    - In Team Hybrid: "Assigned reviewers: CISO → @samchen, MRM → @platform-lead"
-    - In Enterprise Manual: "Multi-signature required: CISO, MRM, Compliance. Use court signoff <id> --domain <ciso|mrm|...> --user <handle>"
-  - Visual NASA board now includes human sign-off indicators (e.g. ✅ / ⏳ per domain)
+  Show full Governance Court output: reviewer JSONs, pros/cons, scores, NASA-style board, aggregate recommendation  
+  Displays current Court mode and human review implications  
+  For drafts: `court view --draft <uuid>`
 
 - `court qa <proposal-id> <question>`  
   Ask interactive clarification question routed to one or more reviewer personas
 
-- `court signoff <proposal-id> --domain <ciso|mrm|compliance|ethics|sre|helpfulness> [--notes <text>]`
-  - Used in Hybrid / Manual modes to record human approval for a specific reviewer domain
-  - Requires authentication context if multi-user (future Phase 2; MVP uses CLI user identity or --user flag)
-  - Logs signed entry; proposal advances only when required domains are signed
-
 - `court vote <proposal-id> <approve|reject|defer>`  
   Cast final user decision  
-  Flags: `--notes <text>`, `--conditions <json-string>`
-  - Hobbyist Auto: vote applies immediately (unless overridden by conditions)
-  - Assisted / Hybrid / Manual: vote only finalizes after all required human signoffs are collected
-  - New flag: `--as-domain <ciso|mrm|...>` (in Hybrid/Manual; records vote as that reviewer)
+  Flags: `--notes <text>`, `--conditions <json-string>`  
+  In Auto mode with `--confirm`: low-risk proposals may auto-apply after Court  
+  In Assisted/Hybrid/Manual: explicit vote required after reviewing reports
 
 ### 3.4 Observability & Audit
+
 - `status [--watch]`  
   Real-time overview: active sandboxes, resource usage, pending proposals, Court state  
-  Output additions:
-    - Current Court mode
-    - Pending human sign-offs (if any) with domains/personas (e.g. "Awaiting CISO & MRM approval – Proposal 0012")
-    - Mode-specific notes (e.g. "Hobbyist Auto: one-click approve enabled for low-impact changes")
+  Shows current Court mode and any pending user votes
 
 - `log list [--filter <proposal-id|mutation-id|date-range>] [--export <path.jsonl>]`  
   View / export Merkle-signed audit trail entries
 
-- `snapshot create [--name <label>] [--enterprise]`  
-  Generate frozen state tarball + SBOM + regulatory mapping export
+- `snapshot create [--name <label>]`  
+  Generate frozen state tarball + SBOM (basic)
 
-- `--pending-signoff` (show only proposals awaiting human approval)
+- `audit verify`  
+  Recompute Merkle chain and signatures; report intact or tampered entries
 
 ### 3.5 Recovery & Maintenance
+
 - `rollback <mutation-id | last>`  
   Revert specific (or most recent) applied mutation  
   Flags: `--all` (rollback to bootstrap), `--dry-run`
@@ -126,73 +155,47 @@ aegiscourt [global flags] <subcommand> [args]
 - `update [--channel <stable|edge>]`  
   Check for new kernel release and propose upgrade via Court
 
-## 4. Example Happy Path (Alex Rivera – Hobbyist)
+## 4. Example Happy Path (Hobbyist – Alex Rivera)
 
 ```bash
 # 1. First run
 aegiscourt init --llm ollama --profile-template hobbyist
-# → Welcome wizard → "Kernel bootstrapped. Self-hash: ed25519:abc123…"
+# → Wizard recommends nemotron-3-nano → kernel bootstrapped
 
 # 2. Start runtime
 aegiscourt start
 
-# 3. Run simple task
-aegiscourt agent run "List my top 3 open GitHub issues"
+# 3. Simple task
+aegiscourt agent run "What time is it right now?"
 
-# 4. Propose improvement after noticing repeated need
-aegiscourt propose add-tool "web_search" \
-  --description "Mediated search via user-configured API" \
-  --diff-file ./proposals/web_search_v1.json
+# 4. Guided proposal to improve
+aegiscourt propose agent-help "add safe way to get current time without network calls"
+# → Draft generated → wizard opens for refinement
+# ... complete wizard ...
+aegiscourt propose submit draft-abc123
 
-# → Proposal ID: 0007. Court reviewing… Complete in 38 seconds.
-
-# 5. Review & interact
+# 5. Review & approve
 aegiscourt court view 0007
-aegiscourt court qa 0007 "How are we preventing prompt injection via search results?"
-aegiscourt court vote 0007 approve --confirm --notes "Mitigations look solid; adding length cap myself"
+aegiscourt court vote 0007 approve --confirm
 
-# 6. Verify
+# 6. Verify & monitor
 aegiscourt status
 aegiscourt log list --filter 0007
-
-# 7. Panic button if something feels off
-aegiscourt halt
-```
-
-## 4.1 Example – Enterprise Manual Mode (Dr. Lena Moreau persona)
-```bash
-# Assume already in Manual mode
-aegiscourt propose add-tool "external_api" --description "..."
-
-# Court runs → Proposal ID: 0042
-
-aegiscourt court view 0042
-# → Shows full reports + "Pending: CISO, MRM, Compliance sign-off"
-
-# CISO signs off
-aegiscourt court signoff 0042 --domain ciso --notes "Syscall filters added; acceptable risk"
-
-# Later, after all signoffs
-aegiscourt court vote 0042 approve --notes "Board consensus reached"
 ```
 
 ## 5. Non-Functional Requirements
-- Startup latency: <1 second (kernel already running checks are near-instant)
-- Court round-trip target: ≤45 seconds on consumer hardware (shared with PRD KPI)
-- Human sign-off latency: tracked separately; no hard timeout in MVP (escalation via notification hooks Phase 2)
+- Startup latency: <1 second
+- Court round-trip target: ≤60 seconds on consumer hardware
 - Output: ANSI tables for humans, clean JSON for `--json`
-- Logging: Every mutating command → signed audit entry before + after
-- Help: cobra-style rich help with examples per subcommand
-- Error codes: Exit 1 + descriptive message + constitution rule reference when applicable
+- Logging: Every mutating command → signed audit entry
+- Help: rich `--help` per subcommand with examples
+- Error codes: Exit 1 + descriptive message + constitution rule reference
 
-## 6. Future Evolution (Phase 2+)
-- TUI / web UI wrapper (`aegiscourt ui`)
-- Multi-user / team mode (`--user <id>`)
-- Notification hooks for pending sign-offs (email/slack/webhook)
-- Role-based access control for signoff domains
-- Custom CLI extensions as Court-approved skills
-- Scripting helpers (`aegiscourt script generate`)
+## 6. Future Evolution (Phase 3+)
+- TUI / web UI wrapper
+- Multi-user / team signoff with cryptographic keys
+- Notification hooks (webhook, email)
+- Proposal templates gallery
+- External skill verification
 
 See PRD.md §5.4 for high-level summary embedded in product requirements.
-
-Next: Prototype using urfave/cli or spf13/cobra in Go; validate UX with Alex Rivera & Jordan Hale personas.

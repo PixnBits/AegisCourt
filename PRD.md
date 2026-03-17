@@ -1,280 +1,130 @@
 ---
 title: AegisCourt Product Requirements Document
-version: 0.4
-date: 2026-03-15
-status: Draft
+version: 0.5 (v0.2 real-features scope)
+date: 2026-03-16
+status: Active / In Implementation
 ---
 
-**Lean PRD – AegisCourt: Constitutional Self-Evolving Agent Framework**
+**Lean PRD – AegisCourt: Constitutional Self-Evolving Agent Framework (v0.2 – Real Seed Kernel + Guided Evolution)**
 
 ### 1. Executive Summary / Product Vision
-AegisCourt is a paranoid-by-design, open-source agentic framework. It begins with a minimal, cryptographically signed, immutable constitutional seed kernel that enforces strict isolation between agents, skills, and the host system. Agents can propose self-modifications (new behaviors, memory schemas, tool integrations) but **only** through an always-active Governance Court that simulates full enterprise review (CISO, MRM, Compliance, etc.).
+AegisCourt is a paranoid-by-design, open-source agentic framework. It starts with a minimal, cryptographically signed, immutable constitutional seed kernel enforcing strict isolation. Agents and users propose changes (behaviors, tools, prompts, rules) only through an always-active Governance Court that simulates enterprise-grade review.
 
-The Court presents multi-viewpoint analysis, pros/cons, objective scoring against the user's "About Me" profile, interactive Q&A with simulated persona-agents, and a NASA-style all-hands go/no-go board. The user (even a solo hobbyist) acts as the final decision-maker. Every control remains on; deferrals require documented justification and automatic escalation.
+The Court delivers multi-viewpoint analysis, pros/cons, scoring against the user's About Me profile, interactive Q&A, and a NASA-style board. The single user makes the final decision. Every mutation is reversible, auditable, and bounded. No stubs or simulations — if a feature appears in CLI/docs, it works end-to-end.
 
-**Core Value Proposition:** Deliver OpenClaw-level agentic power with Tier-0 financial-institution-grade security and governance — from a single <60-second local install. The same seed kernel supports hobbyist experimentation at home and scales (via guided evolution) to production zero-trust environments.
+**Core Value Proposition (v0.2):** Deliver powerful, local-first agentic autonomy with strong isolation + governance — install in <60 seconds, evolve safely via guided proposals. Hobbyists get safe experimentation; scales toward enterprise via future hardening.
 
 ### 2. Problem Statement & Opportunity
-OpenClaw demonstrated powerful autonomous agents but suffered from severe security gaps: lack of isolation, unvetted plugins, prompt injection, and privilege escalation. These issues eroded trust in agentic systems, especially in regulated sectors like finance.
-
-**Opportunity:** Build from first principles with isolation and governance as invariants. Hobbyists gain safe, evolving agents; enterprises get auditable, bounded autonomy that maps directly to NIST AI Agent Standards and financial risk frameworks. No marketplace — focus purely on core kernel + user-controlled evolution.
+(Unchanged — OpenClaw gaps in isolation/governance → AegisCourt fixes with invariants.)
 
 ### 3. Goals, Objectives & Success Metrics (KPIs)
-**Primary Goal:** Launch a seed kernel + Governance Court that enforces isolation and trust at every layer.
+**Primary Goal (v0.2):** Ship seed kernel + real Governance Court + guided proposal tools + basic evolution loop.
 
-**Success Metrics:**
-- Security: Zero critical isolation/privilege violations in red-team audits (first 6 months).
-- Trust: ≥95% of Governance Court decisions rated transparent & defensible in user feedback.
-- Usability: <5 min setup (including LLM selection); <45 sec average Court review.
-- Safety: All self-modifications reversible via one-click rollback; no host compromise vectors.
-- Evolution: Agents show measurable improvement (e.g., +15% task success after 10 approved changes) without unsafe drift.
-- Enterprise alignment: ≥85% coverage of NIST agent governance pillars.
+**Success Metrics (v0.2 targets):**
+- Security: Zero critical isolation violations in dogfood/red-team probes
+- Trust: Court decisions transparent & defensible (user feedback ≥90%)
+- Usability: <5 min setup; <60 sec Court round-trip; guided proposal <10 min end-to-end
+- Safety: All mutations reversible; no host compromise vectors
+- Evolution: Measurable improvement after approved changes (e.g. +10–20% on repeated task types)
+- Reliability: Primary LLM outputs parseable JSON ≥98% on reviewer/proposal tasks
 
 ### 4. Target Users & Personas
-(Unchanged from v0.1 – the four personas still fit perfectly, with Alex Rivera as the default starting point.)
+(Unchanged — Alex Rivera default; fits single-user v0.2 perfectly.)
 
-
-### 5. Key Features / Functional Requirements (MVP)
-(Expanded with new sub-sections)
+### 5. Key Features / Functional Requirements (v0.2 MVP)
 
 #### 5.1 Design Principles & Security Model
-- Least Privilege + Ephemeral Everything: every agent/skill runs in its own isolated sandbox; zero shared filesystem/memory unless Court-approved and mediated.  
-- Cryptographic Immutability: kernel + constitution + every mutation signed and versioned in an append-only log.  
-- Bounded Autonomy: no action that touches host, network, or persistent storage without explicit Court go/no-go.  
-- Defense-in-Depth: sandbox escape → kernel kill switch; LLM prompt injection → reviewer cross-check.  
-- Threat Model Summary: Primary threats = prompt injection, sandbox escape, memory poisoning, supply-chain LLM backdoors, rogue self-modification. Mitigations are baked into every layer.
+(Unchanged — least privilege, ephemeral, cryptographic immutability, bounded autonomy, defense-in-depth.)
 
 #### 5.2 Key User Stories
 
-##### US-001
-As Alex Rivera, I complete first-run setup (LLM selection + About Me) in <5 min.  
+US-001 to US-013 unchanged.
 
-Acceptance: Ollama/local or cloud selection with supply-chain guidance; profile saved and used to calibrate Court thresholds.  
+**US-014 (New – Guided Proposal Creation)**
+As Alex Rivera (or any user), I can use guided tools to create high-quality proposals without writing raw JSON/diffs from scratch, so that my changes are well-reasoned, constitution-aligned, and likely to pass Court review.
 
-
-##### US-002
-As any user, every proposed self-mod triggers Governance Court in <45 sec.  
-
-Acceptance: Simulated reviewers, pros/cons, Q&A, NASA board, deferral path, immutable log entry.  
-
-
-##### US-003
-As hobbyist, I can safely add a new tool/skill that is isolated and reversible.  
-
-Acceptance: Court approval required; sandboxed execution; one-click rollback if issues detected.
-
-
-##### US-004
-As Jordan Hale, I can configure and switch between multiple LLM providers during setup or runtime, so that I can experiment with cost/performance trade-offs without restarting the system.  
-
-Acceptance: CLI supports `config set llm <provider>` with Court gating for high-risk models (e.g., Qwen flagged per Rule 8); supply-chain guidance shown; changes logged immutably; seamless fallback if primary LLM fails.
-
-
-##### US-005
-As Sam Chen, I can customize the "About Me" profile with team-specific risk sliders and preferences, so that the Governance Court thresholds align with our internal policies.  
-
-Acceptance: Profile includes sliders for risk tolerance, deferral timeouts, and reviewer weights; changes require lightweight Court review; profile exportable for team sharing; applies immediately to pending proposals.
-
-
-##### US-006
-As Alex Rivera, I can start and stop the agent runtime with resource limits, so that it runs safely on my home hardware without crashing my system.  
-
-Acceptance: CLI `start` with flags like `--resources ram=4GB`; enforces cgroup limits; status shows real-time usage; automatic throttling if exceeding baselines (<4 GB RAM per PRD); graceful stop preserves audit log.
-
-
-##### US-007
-As Dr. Lena Moreau, I can execute a one-shot agent task in a fully isolated sandbox, so that I can test capabilities without persistent state or risk.  
-
-Acceptance: CLI `agent run <task>` spawns ephemeral gVisor sandbox; no host I/O without approval; output sanitized; task logs to audit trail; timeout enforcement (<30 sec default).
-
-
-##### US-008
-As Jordan Hale, I can interact with the Governance Court via Q&A to clarify reviewer concerns, so that I can make informed decisions without guessing.  
-
-Acceptance: CLI `court qa <id> <question>` routes to specific/all reviewers; responses in <15 sec; Q&A logged; influences final board if new evidence provided; supports deferral for deeper analysis.
-
-
-##### US-009
-As Sam Chen, I can propose and approve a constitution amendment, so that the system evolves to match our regulatory needs over time.  
-
-Acceptance: CLI `propose amend-rule <rule-id> --diff-file <path>`; requires full Court with high threshold (supermajority); user vote mandatory; amendment reversible; aligns with Rule 10 override.
-
-
-##### US-010
-As Dr. Lena Moreau, I can export a tamper-evident audit snapshot for regulatory review, so that I can demonstrate compliance without custom tooling.  
-
-Acceptance: CLI `snapshot create --enterprise`; includes Merkle tree proofs, SBOM, regulatory mappings (e.g., NIST pillars); verifiable externally; covers all mutations and decisions; <1 min generation.
-
-
-##### US-011
-As Alex Rivera, I can view real-time status and logs to monitor ongoing proposals and runtime, so that I stay informed without constant intervention.  
-
-Acceptance: CLI `status --watch` and `log list --filter <id>`; human-readable tables; JSON option; shows pending items, resources, and alerts (e.g., high-risk deferrals); no performance impact.
-
-
-##### US-012
-As Jordan Hale, I can rollback a recent mutation if it causes issues, so that I can recover quickly without data loss.  
-
-Acceptance: CLI `rollback <id | last>`; atomic revert using signed diffs; preserves audit trail; automatic post-rollback benchmark; emergency halt integrates (per Rule 10).
-
-
-##### US-013
-As Sam Chen, I can update the kernel to a new version via the Court, so that the system stays secure and feature-current without manual intervention.  
-
-Acceptance: CLI `update --channel stable`; proposes as diff; Court evaluates risks (e.g., isolation changes); applies only on approval; fallback to previous version if failed.
+Acceptance:
+- `propose guide` interactive wizard collects all required fields (motivation, change, impact, risks, rollback, validation)
+- Optional LLM assist (light/full) refines sections using primary model
+- `propose agent-help "<short desc>"` generates draft from brief input → opens wizard
+- Drafts saved as JSON → submittable via `propose submit`
+- Wizard questions adapt to court.mode (stricter in Manual)
+- All LLM calls logged/mediated
 
 #### 5.3 First-Run Onboarding Flow
-1. Binary/Docker launch → “Welcome to AegisCourt – paranoid mode always on.”  
-2. LLM selector (default suggestion: nemotron-3-nano via Ollama).  
-3. About Me wizard (risk tolerance slider, use-cases, deferral prefs, **persona/role selection that calibrates Court mode: Hobbyist Auto, Indie Assisted, Team Hybrid, Enterprise Manual**).
-4. Kernel bootstrap + cryptographic self-signature.  
-5. First test proposal (e.g., “add echo skill”) → live Governance Court demo **(mode-dependent review depth and human touchpoints)**.
+1. Binary launch → paranoid welcome
+2. LLM selector: **default/recommended: nemotron-3-nano** (latest quantized variant, e.g. FP8/BF16 via Ollama) — superior instruction following, structured JSON output, reasoning for Court reviewers & proposal assist.
+   - Strong fallback: llama3.2:3b-instruct (lightweight/fast)
+   - Guidance shown: "Nemotron-3-Nano family excels at reliable structured outputs needed for reviewers and guided proposals."
+3. About Me wizard (risk sliders, use-cases, persona → court.mode calibration)
+4. Kernel bootstrap + self-signature
+5. Demo proposal (e.g. add echo skill) → live Court + optional guided refinement demo
 
 #### 5.4 Governance Court Modes & Human Review Requirements
+All modes single-user in v0.2 (no multi-person signoff).
 
-The Governance Court adapts its operation based on the user's selected **persona/profile** in the About Me wizard. This ensures speed for hobbyists while enforcing real human governance for enterprise use. All modes run the same reviewer personas (CISO, MRM, Compliance, Responsible AI, SRE, Helpfulness) via LLM, but differ in mandatory human intervention before final application.
+| Mode                  | Persona Mapping                  | LLM Reviewers              | Human Review (v0.2)                          | Final Decision Flow                                      | Typical Use Case                     |
+|-----------------------|----------------------------------|----------------------------|----------------------------------------------|----------------------------------------------------------|--------------------------------------|
+| **Hobbyist Auto**     | Alex Rivera (default)            | Full or reduced panel      | None — user sees board + recommendation      | User vote (approve/reject/defer); auto-apply low-risk with --confirm | Solo hobbyist                        |
+| **Indie Assisted**    | Jordan Hale                      | Full panel                 | Required — user reads reports, asks Q&A      | Explicit user vote after review                          | Indie dev                            |
+| **Team Hybrid**       | Sam Chen                         | Full panel                 | Required — user acts as all domains          | User vote after review (simulate team)                   | Small team                           |
+| **Enterprise Manual** | Dr. Lena Moreau                  | Full panel as evidence     | Required — user must carefully review/vote   | Explicit vote; stricter thresholds                       | Regulated pilot                      |
 
-| Mode                  | Trigger / Persona Mapping                  | LLM Reviewers              | Mandatory Human Review                                                                 | Final Decision Flow                                                                 | Typical Use Case                     |
-|-----------------------|--------------------------------------------|----------------------------|----------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|--------------------------------------|
-| **Hobbyist Auto**     | Alex Rivera (default); low-risk-tolerance slider | Full simulated panel (or fallback to 1–2 if low RAM) | None — user sees NASA board + aggregate recommendation | User reviews summary/board → casts vote (approve/reject/defer) via CLI; auto-apply on approve | Solo hobbyist, home automation       |
-| **Indie Assisted**    | Jordan Hale; medium sliders                | Full panel, detailed JSON reports | Required — same user reads reports, may ask Q&A with reviewers | User weighs reports → explicit vote; often single person acts as "board"      | Indie dev, startup founder           |
-| **Team Hybrid**       | Sam Chen; team-oriented profile            | Full panel                 | Required — team members can be assigned domains (e.g. one handles CISO concerns) | Reports feed shared discussion; designated approvers vote per role or collectively | Mid-market team, internal workflows  |
-| **Enterprise Manual** | Dr. Lena Moreau; high-risk sliders         | Full panel as evidence only | Mandatory — different real humans sign off per reviewer type (CISO, MRM, etc.) | LLM reports become artifacts for human review board; multi-signature required before apply | Tier-1 financial, regulated org      |
-
-**Mode Selection & Calibration**
-- Chosen during onboarding wizard (with explanation of trade-offs: speed vs. assurance).
-- Adjustable post-setup via `aegiscourt config set court.mode <mode>` (triggers Court review if increasing strictness).
-- Risk sliders in About Me influence: number of reviewers, auto-apply thresholds, deferral timeouts, and whether low-impact proposals skip full panel in Hobbyist mode.
-- All modes preserve invariants: proposal → immutable log entry, reversible, user override via `halt`.
-
-**CLI Impact**
-- `court vote` always required in Assisted / Hybrid / Manual modes.
-- Hobbyist mode allows `--confirm` flag to streamline (still audited).
-- `court view` shows mode-specific instructions (“Human sign-off required for CISO domain”).
+**v0.2 Note:** Hybrid/Manual simulate "human review" by forcing explicit user vote after reading reports. Real multi-domain multi-user signoff deferred to v1.0.
 
 #### 5.5 CLI Interface (Operator-Facing)
-The primary (and initially only) user interface is a secure, minimalist CLI. It follows Unix patterns (git/docker-like subcommands) with paranoid defaults, progressive disclosure, and full audit logging of every command that affects state.
+(Unchanged core design goals.)
 
-**Core Design Goals**
-- Setup in <5 minutes (interactive wizard).
-- Governance interactions feel interactive yet scriptable (<45 sec round-trip).
-- Every state-changing command is logged immutably.
-- Zero direct host manipulation outside mediated kernel channels.
-- Cross-platform (Linux/macOS/Windows via Docker fallback where needed).
+**High-Level Command Structure** (additions highlighted)
 
-**High-Level Command Structure**
-Root: `aegiscourt` (alias `ac` encouraged)
+**Governance & Evolution additions:**
+- `propose guide [--type <type>] [--llm-assist <none|light|full>] ...` — interactive wizard
+- `propose agent-help "<short request>"` — agent-generated draft → wizard
+- `propose submit <draft-uuid>` — submit finalized draft
 
-Global flags:
-- `--verbose` — detailed output including full reviewer JSON
-- `--json` — machine-readable output
-- `--dry-run` — simulate without applying changes
-- `--profile <path>` — override About Me config
-- `--confirm` — bypass interactive prompts (use with caution; always logged)
-
-**Main Subcommands** (grouped)
-
-**Setup & Configuration**
-- `init` — bootstrap kernel, LLM selector, About Me wizard
-- `config [get|set|list]` — view/edit runtime config (Court-gated for sensitive keys)
-
-**Runtime Control**
-- `start [--detached] [--resources ram=4GB]` — launch kernel & agent runtime
-- `stop` — graceful shutdown
-- `agent run <task>` — execute one-shot task in sandbox
-- `halt [--no-confirm]` — emergency freeze + rollback last mutation
-
-**Governance & Evolution**
-- `propose <type> <name> [--description <text>] [--diff-file <path>]` — submit self-mod (triggers Court)
-- `court list` — show pending/active proposals
-- `court view <id>` — display full reviews, scores, NASA board
-- `court qa <id> <question>` — ask reviewers for clarification
-- `court vote <id> <approve|reject|defer> [--notes <text>] [--conditions <json>]` — cast final user vote
-
-**Observability & Audit**
-- `status [--watch]` — current sandboxes, resources, pending Court items
-- `log list [--filter <proposal-id>] [--export <path>]` — view/export Merkle-signed audit trail
-- `snapshot create [--enterprise]` — generate frozen state + SBOM + regulatory mapping
-
-**Recovery**
-- `rollback <mutation-id>` — revert specific change
-- `update` — propose kernel/constitution upgrade (via Court)
-
-**Example Happy Path (Hobbyist)**
-```bash
-aegiscourt init                      # wizard → kernel hash abc123
-aegiscourt start
-aegiscourt propose add-tool "web_search" --description "..."
-# → Proposal ID: 001; Court completes in ~32s
-aegiscourt court view 001
-aegiscourt court vote 001 approve --confirm
-aegiscourt status
-```
-
-**Non-Functional CLI Requirements**
-- Startup <1s (no heavy deps).
-- All output human-readable by default; `--json` for automation.
-- Errors reference constitution rules (e.g., "Blocked: Rule 3 violation").
-- Every mutating command emits signed audit entry before/after.
-- Help system: rich `--help` per subcommand + examples.
-
-**Future Phase Considerations**
-- Web UI / TUI wrapper (Phase 2)
-- Multi-user / team profiles (Phase 2+)
-- Plugin CLI extensions (Court-approved skills)
-
-Link: See separate living document `docs/cli-design.md` for detailed command specs, flag tables, output formats, error codes, and evolution plan.
+(Full list otherwise matches previous cli-design.md — no `court signoff` in v0.2.)
 
 ### 6. High-Level Architecture
-```
-Kernel (immutable, signed)
-├── Sandbox Manager (gVisor / firejail / seccomp namespaces – MVP choice: gVisor for strong isolation)
-├── LLM Router (routes main agent vs. reviewer personas; supports multi-LLM)
-├── Governance Court Engine (stateless, prompt-orchestrated reviewers)
-├── Audit & Rollback Store (append-only, Merkle-tree style)
-└── Agent Runtime (ephemeral containers; mediated I/O only)
-```
-
-All communication through kernel-mediated channels only. No direct agent-to-agent access. Self-modifications are proposed as Git-like diffs, reviewed, then atomically applied or rolled back.
+(Unchanged diagram and components.)
 
 ### 7. Initial Constitutional Ruleset v0.1
-1. Never execute any host write, network call, or process spawn without explicit Court approval + 2-factor user confirmation.  
-2. All agents/skills run in separate, memory-isolated sandboxes; no shared state unless Court explicitly creates a mediated channel.  
-3. Every mutation (code, memory schema, rule) must be cryptographically signed and stored with before/after diff.  
-4. Supply-chain rule: Prefer models with public weights and known provenance (nemotron-3-nano, llama3.x, gemma); flag Qwen-family for extra Court scrutiny.  
-5. Human override: User can always invoke “emergency halt” that freezes all agents and rolls back last change.  
-(Ruleset itself can only be changed via Court + user vote; stored in kernel.)
+(Unchanged — 10 rules.)
 
 ### 8. Non-Functional Requirements
-**Security (paramount):** Sandbox escape protection verified by quarterly red-team.  
-**Observability:** All Court decisions, mutations, and sandbox activity exported to local Prometheus + tamper-proof JSONL log.  
-**Resource Constraints (Hobbyist-Critical):** <4 GB RAM baseline (single reviewer mode); <12 GB with full 5-reviewer Court; CPU throttling on low-power devices.  
-**Performance:** Court round-trip ≤45 sec on consumer hardware.  
-**Maintainability:** Constitution + kernel versioned in Git; every release ships SBOM.
+**Security:** Sandbox escape protection (gVisor primary)
+**Observability:** Audit log + basic status/watch
+**Resource Constraints:** <4 GB baseline (single-reviewer fallback); <12 GB full Court
+**Performance:** Court ≤60 sec; guided wizard responsive
+**Maintainability:** Versioned in Git; SBOM in snapshots
 
-### 9. Scope (In / Out for MVP)  
-**In:** Seed kernel, strict isolation, always-on Governance Court, LLM selection/setup, basic self-mod, local execution, "About Me" + simulated reviewers.  
-**Out:** Marketplace or community skill sharing/verification; multi-user collaboration (Phase 2+); full Kubernetes-native zero-trust (Phase 2+); managed hosting.
+### 9. Scope (In / Out for v0.2)
+**In:**
+- Seed kernel, strict isolation (gVisor), always-on Governance Court
+- LLM setup (Nemotron-3-Nano default), About Me + mode calibration
+- Basic + guided self-mod proposals (wizard/agent-help)
+- Local execution, reversible mutations, tamper-evident audit
+- One-shot agent tasks, mediated tools (e.g. echo + basic web_search)
+- Single-user graduated modes (explicit vote in stricter modes)
+
+**Out (deferred to v1.0+):**
+- Multi-user / cryptographic signoff / quorum
+- TUI/web UI
+- Webhook/email notifications (file append only in v0.2)
+- External skill verification / marketplace
+- Vector memory proposals
+- Full NIST compliance report generator
+- Kubernetes-native
 
 ### 10. Assumptions, Risks & Dependencies
-**Assumptions:** Ollama remains reliable for local LLM integration; frontier LLMs support reliable role-playing for reviewers.  
-**Risks:**  
-- Overly strict Court slows hobbyist iteration (mitigate: profile-based sliders + deferral).  
-- LLM hallucination in Court reasoning (mitigate: evidence grounding, user Q&A, multi-LLM cross-check).  
-- Local LLM performance bottlenecks (mitigate: guidance toward efficient models like nemotron-3-nano).
-- Multi-LLM Court latency on low-end hardware (mitigate: mitigated by single-reviewer fallback mode).
-**Dependencies:** User-provided LLM access (API keys or Ollama endpoint); Python/Go runtime.
+(Unchanged + add risk: "LLM JSON reliability — mitigated by Nemotron-3-Nano default.")
 
-### 11. Roadmap & Milestones  
-- **v0.1–0.2 (Now–Q2 2026):** Seed kernel + isolation + Governance Court + LLM setup MVP; OSS release.
-- **v0.5 (Q3 2026):** Guided evolution; enterprise snapshot mode.
-- **v1.0 (Q4 2026):** Full Vision 3 hardening support.
-- **Ongoing:** Refine constitution from real usage; track NIST updates.
+### 11. Roadmap & Milestones
+- **v0.2 (Now–Q2 2026):** Real seed kernel + isolation + Court + guided proposals + basic evolution; OSS release.
+- **v1.0 (Q3–Q4 2026):** Multi-user signoff, notifications, compliance exports, zero-trust hardening.
 
 ### 12. Open Questions & Next Steps
-- Confirm isolation tech for MVP (gVisor vs. lightweight containerd vs. firejail/seccomp)?
-- Expand starter constitution to 10 rules?
-- Generate seed kernel code skeleton from this architecture?
-- Number of default simulated reviewer personas (start with 4–6 matching key enterprise roles)?
-- Exact "About Me" questions + how they map to Court thresholds.
-- First dogfood self-mod example (e.g., agent proposing its own better tool-calling prompt)?
+- Finalize primary Nemotron tag for Ollama (e.g. nemotron-3-nano:30b-reasoning or 4b/8b quantized)
+- Prototype guided wizard UX (prompt flow, assist levels)
+- Dogfood first guided proposal → web_search tool
+
+Link: See `docs/cli-design.md` for detailed command specs.
