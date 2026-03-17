@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -178,6 +179,9 @@ func main() {
 			} else {
 				fmt.Println("Usage: benchmark llm")
 			}
+			return
+		case "status":
+			handleStatus()
 			return
 			if len(os.Args) > 2 {
 				switch os.Args[2] {
@@ -401,4 +405,43 @@ func handleBenchmarkLLM() {
 		return
 	}
 	fmt.Printf("LLM call took %v\n", duration)
+}
+
+func handleStatus() {
+	resources := DetectResources()
+	fmt.Printf("System Resources:\n")
+	fmt.Printf("  RAM Free: %.2f GB\n", resources.RAMFreeGB)
+	fmt.Printf("  Has GPU: %t\n", resources.HasGPU)
+	if resources.HasGPU {
+		fmt.Printf("  VRAM Free: %.2f GB\n", resources.VRAMGB)
+	}
+	fmt.Printf("  Recommended LLM: %s\n", resources.RecommendedLLM)
+	fmt.Printf("  Suggest Sequential: %t\n", resources.SuggestSequential)
+
+	// Check audit
+	intact, errs := audit.Verify()
+	if intact {
+		fmt.Println("Audit: Intact")
+	} else {
+		fmt.Println("Audit: Compromised")
+		for _, err := range errs {
+			fmt.Printf("  %v\n", err)
+		}
+	}
+
+	// Check proposals
+	proposalsDir := filepath.Join(os.Getenv("HOME"), ".aegiscourt", "proposals")
+	if files, err := os.ReadDir(proposalsDir); err == nil {
+		fmt.Printf("Proposals: %d drafts\n", len(files))
+	} else {
+		fmt.Println("Proposals: 0 drafts")
+	}
+
+	// Check court results
+	courtDir := filepath.Join(os.Getenv("HOME"), ".aegiscourt", "court")
+	if files, err := os.ReadDir(courtDir); err == nil {
+		fmt.Printf("Court Results: %d\n", len(files))
+	} else {
+		fmt.Println("Court Results: 0")
+	}
 }
