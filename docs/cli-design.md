@@ -67,10 +67,17 @@ aegiscourt [global flags] <subcommand> [args]
 
 - `agent run <task description>`  
   One-shot agent execution in ephemeral sandbox  
-  Flags: `--agent-id <uuid>`, `--timeout <30s>`, `--output-format <text|json>`
+  Flags: `--agent-id <uuid>`, `--timeout <30s>`, `--output-format <text|json>`  
+  **Dynamic tool registry:** The system prompt is built from `~/.aegiscourt/tools.json` at runtime.  
+  Tools registered via approved mutations (e.g. `utc_time`) are available to the agent.  
+  Tool calls use JSON format: `{"tool": "name", "args": {...}}`  
+  Built-in tools: `echo` (default), `utc_time` (after proposal)
 
 - `halt [--no-confirm]`  
-  Emergency: freeze all agents, rollback last mutation, enter read-only mode
+  Emergency: freeze all agents, rollback last mutation, enter read-only mode  
+  **Mechanism:** Rolls back the last applied mutation via the mutation engine,  
+  then writes a `HALTED` marker file to `~/.aegiscourt/`. While halted, status  
+  command shows the halt state. Remove the marker or re-init to resume.
 
 ### 3.3 Governance & Evolution
 
@@ -131,13 +138,23 @@ aegiscourt [global flags] <subcommand> [args]
   Cast final user decision  
   Flags: `--notes <text>`, `--conditions <json-string>`  
   In Auto mode with `--confirm`: low-risk proposals may auto-apply after Court  
-  In Assisted/Hybrid/Manual: explicit vote required after reviewing reports
+  In Assisted/Hybrid/Manual: explicit vote required after reviewing reports  
+  **On approve:** The mutation engine atomically applies the proposed change:  
+  1. Loads the Court result and linked draft proposal  
+  2. Builds a typed patch from the draft's `proposed_change` field  
+  3. Validates the patch via the type-specific handler (add-tool, change-prompt, amend-rule, etc.)  
+  4. Creates a tar.gz snapshot of `~/.aegiscourt/` (excluding snapshots/ and mutations/)  
+  5. Applies the mutation (e.g. registers tool in `tools.json`, writes prompt file, updates constitution rules)  
+  6. Records mutation metadata + audit entry  
+  On failure at any step, the engine auto-rollbacks to the snapshot and marks the mutation as failed.
 
 ### 3.4 Observability & Audit
 
 - `status [--watch]`  
   Real-time overview: active sandboxes, resource usage, pending proposals, Court state  
-  Shows current Court mode and any pending user votes
+  Shows current Court mode and any pending user votes  
+  **Mutation info:** Displays last applied mutation (ID, type, title, applied time)  
+  **Halt detection:** Shows `HALTED` state if emergency halt marker exists
 
 - `log list [--filter <proposal-id|mutation-id|date-range>] [--export <path.jsonl>]`  
   View / export Merkle-signed audit trail entries
@@ -152,7 +169,10 @@ aegiscourt [global flags] <subcommand> [args]
 
 - `rollback <mutation-id | last>`  
   Revert specific (or most recent) applied mutation  
-  Flags: `--all` (rollback to bootstrap), `--dry-run`
+  Flags: `--all` (rollback to bootstrap), `--dry-run`  
+  **Mechanism:** Restores the tar.gz snapshot captured before the mutation was applied,  
+  then calls the type-specific handler's Rollback method (e.g. removes tool from registry).  
+  Updates mutation status to `rolled_back` and records audit entry.
 
 - `update [--channel <stable|edge>]`  
   Check for new kernel release and propose upgrade via Court
@@ -179,9 +199,17 @@ aegiscourt propose submit draft-abc123
 # 5. Review & approve
 aegiscourt court view 0007
 aegiscourt court vote 0007 approve --confirm
+# → Mutation mut-0007-20260317T1234 applied
+# → Snapshot: ~/.aegiscourt/snapshots/snap-mut-0007-20260317T1234.tar.gz
 
-# 6. Verify & monitor
+# 6. Verify the new tool works
+aegiscourt agent run "What time is it right now?"
+# → Agent calls utc_time tool → returns ISO 8601 UTC timestamp
+
+# 7. Monitor & rollback if needed
 aegiscourt status
+# → Last mutation: mut-0007 | add-tool | utc_time | Applied 2026-03-17T12:34:56Z
+aegiscourt rollback last    # reverts snapshot + removes tool from registry
 aegiscourt log list --filter 0007
 ```
 

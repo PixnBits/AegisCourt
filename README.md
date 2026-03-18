@@ -1,6 +1,6 @@
 # AegisCourt
 
-Paranoid-by-design AI governance framework. Local-first, cryptographically immutable, single-user agent framework with a multi-reviewer Governance Court.
+Paranoid-by-design AI governance framework. Local-first, cryptographically immutable, single-user agent framework with a multi-reviewer Governance Court and atomic, reversible self-evolution.
 
 ## Quick Start
 
@@ -32,13 +32,18 @@ go build -o aegiscourt ./cmd/aegiscourt/
 ./aegiscourt court view <id> --detailed
 ./aegiscourt court view <id> --reviewer ciso
 
-# Vote on a proposal
+# Vote on a proposal (approve triggers real mutation application)
 ./aegiscourt court vote <id> approve -y
+# → Mutation applied atomically with snapshot backup
 
-# Rollback if needed
+# Agent now has the approved tool available
+./aegiscourt agent run "What time is it?"
+# → Agent calls utc_time → returns ISO 8601 UTC timestamp
+
+# Rollback if needed (restores snapshot + removes tool from registry)
 ./aegiscourt rollback last
 
-# Check system status
+# Check system status (shows last mutation, halt state)
 ./aegiscourt status
 
 # Verify audit chain integrity
@@ -47,7 +52,7 @@ go build -o aegiscourt ./cmd/aegiscourt/
 # Run benchmark suite
 ./aegiscourt bench run
 
-# Emergency freeze
+# Emergency freeze (rollback + halt marker)
 ./aegiscourt halt
 ```
 
@@ -65,6 +70,8 @@ go build -o aegiscourt ./cmd/aegiscourt/
 - **Weighted aggregate scoring** with NASA-style board display
 - **4 Court modes** — Auto, Assisted, Hybrid, Manual
 - **Guided proposal wizard** with optional LLM assist
+- **Atomic mutation engine** — type-specific handlers (add-tool, change-prompt, amend-rule, add-skill, memory, generic) with snapshot-based rollback
+- **Dynamic tool registry** — `~/.aegiscourt/tools.json` built from approved mutations; agent system prompt generated at runtime
 - **Benchmark suite** — 8 canned tasks with pattern matching, regex, and LLM-as-judge evaluation
 
 See [docs/architecture.md](docs/architecture.md) for full details.
@@ -89,6 +96,9 @@ pkg/
   llm/             Ollama LLM router with fallback
   court/           Governance Court engine, reviewers, storage
   proposal/        Draft schema, validation, storage
+  mutation/        Atomic mutation engine, store, snapshots
+    handlers/      Type-specific handlers (tool, prompt, rule, skill, etc.)
+  agent/           Dynamic tool registry and agent runtime
   resources/       RAM/GPU detection, LLM recommendation
   notify/          File-based notification system
 bench/             Benchmark runner and canned tasks

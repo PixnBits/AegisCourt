@@ -220,10 +220,46 @@ aegiscourt court qa 0008 "Why did CISO flag clock API misuse?"
 aegiscourt court vote 0008 approve --confirm
 ```
 
-### 10. Verify & rollback if needed
+**What happens on approve:**
+1. Mutation engine loads Court result and linked draft proposal
+2. Builds an `add-tool` patch from the draft's `proposed_change`
+3. ToolHandler validates: name, description, handler prefix (`builtin:` or `custom:`)
+4. Creates tar.gz snapshot of `~/.aegiscourt/` (for rollback)
+5. Registers `utc_time` tool in `~/.aegiscourt/tools.json`
+6. Records mutation `mut-0008-20260317T1234` with status `applied`
+7. Writes signed audit entry
+
+**Output:**
+```
+Mutation mut-0008-20260317T1234 applied successfully
+  Type:     add-tool
+  Title:    Add safe utc_time tool (kernel clock only)
+  Snapshot: ~/.aegiscourt/snapshots/snap-mut-0008-20260317T1234.tar.gz
+```
+
+### 10. Verify the new tool works
 ```bash
 aegiscourt agent run "What time is it right now?"
-aegiscourt rollback last   # if anything feels off
+# → Agent system prompt now includes utc_time tool from registry
+# → Agent calls: {"tool": "utc_time", "args": {}}
+# → Kernel returns: "2026-03-17T12:34:56Z"
+```
+
+### 11. Rollback if needed
+```bash
+# Dry-run first
+aegiscourt rollback last --dry-run
+# → Would rollback: mut-0008-20260317T1234 (add-tool: utc_time)
+
+# Actually rollback
+aegiscourt rollback last
+# → Restores snapshot → removes utc_time from tools.json
+# → Mutation status: rolled_back
+# → Agent no longer has utc_time tool
+
+# Verify
+aegiscourt agent run "What time is it?"
+# → Agent responds without utc_time tool (back to echo-only)
 ```
 
 ## Key Takeaways
@@ -231,5 +267,8 @@ aegiscourt rollback last   # if anything feels off
 - **--detailed** uses vertical line breaks for pros/cons/mitigations so nothing wraps awkwardly in most terminals.
 - Every score has traceable, human-readable reasoning — users can see exactly **why** a reviewer gave 90 vs 96.
 - Drill-down commands (`--reviewer`, `--verbose`, `--json`) give power users full control.
+- **Mutations are atomic:** approve triggers real application with snapshot-based rollback safety net.
+- **Dynamic tools:** approved `add-tool` mutations immediately appear in the agent's system prompt.
+- **Full reversibility:** `rollback last` restores the pre-mutation snapshot + removes registered tools.
 
 This flow takes ~5–10 minutes end-to-end and produces a high-quality, reversible change.

@@ -84,6 +84,12 @@ All modes single-user in v0.2 (no multi-person signoff).
 - `propose agent-help "<short request>"` — agent-generated draft → wizard
 - `propose submit <draft-uuid>` — submit finalized draft
 
+**Mutation application (v0.2 real):**
+- `court vote <id> approve` — triggers atomic mutation: snapshot → validate → apply → audit
+- `rollback <mutation-id | last>` — restores snapshot, reverts handler state
+- `halt` — emergency rollback + HALTED marker
+- `status` — shows last mutation, halt state, Court mode
+
 (Full list otherwise matches previous cli-design.md — no `court signoff` in v0.2.)
 
 ### 6. High-Level Architecture
@@ -107,6 +113,10 @@ All modes single-user in v0.2 (no multi-person signoff).
 - Local execution, reversible mutations, tamper-evident audit
 - One-shot agent tasks, mediated tools (e.g. echo + basic web_search)
 - Single-user graduated modes (explicit vote in stricter modes)
+- **Atomic mutation application** — Court approve triggers real apply with snapshot rollback
+- **Dynamic tool registry** — approved add-tool mutations immediately available to agent
+- **Type-specific handlers** — add-tool, change-prompt, amend-rule, add-skill, memory, generic
+- **Snapshot-based rollback** — tar.gz of full state before each mutation; `rollback` restores
 
 **Out (deferred to v1.0+):**
 - Multi-user / cryptographic signoff / quorum
@@ -126,7 +136,8 @@ All modes single-user in v0.2 (no multi-person signoff).
 
 ### 12. Open Questions & Next Steps
 - Finalize primary Nemotron tag for Ollama (e.g. nemotron-3-nano:30b-reasoning or 4b/8b quantized)
-- Prototype guided wizard UX (prompt flow, assist levels)
-- Dogfood first guided proposal → web_search tool
+- ~~Prototype guided wizard UX (prompt flow, assist levels)~~ → Implemented in v0.2
+- ~~Dogfood first guided proposal → web_search tool~~ → Dogfooded utc_time tool end-to-end in v0.2
+- Extend mutation handlers for more complex types (multi-file changes, LLM config swaps)
 
 Link: See `docs/cli-design.md` for detailed command specs.

@@ -18,17 +18,21 @@ Releases are tagged when a coherent, dogfood-tested set of features is ready. No
 **Focus:** Ship a trustworthy, local-first agent executor with strong isolation, always-on governance, and safe self-evolution tools. Single-user only. No stubs or vaporware.
 
 **Key Deliverables**
-- Immutable kernel + self-signature
+- Immutable kernel + self-signature ✅
 - gVisor-based isolation (Linux primary, fallbacks warned)
-- LLM router with Nemotron-3-Nano default
-- Governance Court (4–6 reviewers, mode-calibrated depth)
-- CLI: init, start/stop, agent run, propose (basic + guide/agent-help/submit), court list/view/qa/vote, status/watch, log export, rollback, halt
-- Guided proposal creation (wizard + agent-draft)
-- Basic mediated tools (echo + simple web_search)
-- Reversible mutations + tamper-evident Merkle audit log
-- Resource bounding + low-RAM fallback
-- File-based notifications append (~/.aegiscourt/notifications.jsonl)
+- LLM router with Nemotron-3-Nano default ✅
+- Governance Court (4–6 reviewers, mode-calibrated depth) ✅
+- CLI: init, start/stop, agent run, propose (basic + guide/agent-help/submit), court list/view/qa/vote, status/watch, log export, rollback, halt ✅
+- Guided proposal creation (wizard + agent-draft) ✅
+- Basic mediated tools (echo + simple web_search) ✅ (echo + utc_time via proposal)
+- Reversible mutations + tamper-evident Merkle audit log ✅
+- Atomic mutation engine with type-specific handlers ✅
+- Snapshot-based rollback (tar.gz) + handler rollback chain ✅
+- Dynamic tool registry (`tools.json`) built from approved mutations ✅
+- Resource bounding + low-RAM fallback ✅
+- File-based notifications append (~/.aegiscourt/notifications.jsonl) ✅
 - Basic post-approval regression flagging (no auto-rollback)
+- Benchmark suite (8 canned tasks) ✅
 
 **Success Gates**
 - Zero sandbox escapes in dogfood probes
