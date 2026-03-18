@@ -6,15 +6,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/pixnbits/aegiscourt/bench"
+	"github.com/pixnbits/aegiscourt/pkg/agent"
 	"github.com/pixnbits/aegiscourt/pkg/audit"
 	"github.com/pixnbits/aegiscourt/pkg/config"
 	"github.com/pixnbits/aegiscourt/pkg/court"
 	"github.com/pixnbits/aegiscourt/pkg/keys"
 	"github.com/pixnbits/aegiscourt/pkg/llm"
+	"github.com/pixnbits/aegiscourt/pkg/mutation"
+	"github.com/pixnbits/aegiscourt/pkg/mutation/handlers"
 	"github.com/pixnbits/aegiscourt/pkg/notify"
 	"github.com/pixnbits/aegiscourt/pkg/proposal"
 	"github.com/pixnbits/aegiscourt/pkg/resources"
@@ -182,6 +186,28 @@ func mustInitAudit() *audit.Log {
 func mustInitRouter(cfg *config.Config) *llm.Router {
 	fallback := "llama3.2:latest"
 	return llm.NewRouter(cfg.LLMEndpoint, cfg.PreferredLLM, fallback)
+}
+newMutationEngine(al *audit.Log) *mutation.Engine {
+	eng := mutation.NewEngine(al)
+	eng.RegisterHandler("add-tool", &handlers.ToolHandler{})
+	eng.RegisterHandler("change-prompt", &handlers.PromptHandler{})
+	eng.RegisterHandler("amend-rule", &handlers.ConstitutionHandler{})
+	eng.RegisterHandler("add-skill", &handlers.SkillHandler{})
+	eng.RegisterHandler("upgrade-memory", &handlers.MemoryHandler{})
+	eng.RegisterHandler("other", &handlers.GenericHandler{})
+	return eng
+}
+
+func 
+func newMutationEngine(al *audit.Log) *mutation.Engine {
+	eng := mutation.NewEngine(al)
+	eng.RegisterHandler("add-tool", &handlers.ToolHandler{})
+	eng.RegisterHandler("change-prompt", &handlers.PromptHandler{})
+	eng.RegisterHandler("amend-rule", &handlers.ConstitutionHandler{})
+	eng.RegisterHandler("add-skill", &handlers.SkillHandler{})
+	eng.RegisterHandler("upgrade-memory", &handlers.MemoryHandler{})
+	eng.RegisterHandler("other", &handlers.GenericHandler{})
+	return eng
 }
 
 func readLine() string {
@@ -523,12 +549,13 @@ Available tools: echo, utc_time`)
 	al.Append(fmt.Sprintf("agent_run: task=%s", task))
 
 	ctx := context.Background()
-	systemPrompt := "You are AegisCourt's sandboxed agent. You can use these mediated tools:\n" +
-		"1. echo(message) -- Echo back a message. Use when asked to echo or test.\n" +
-		"2. utc_time() -- Returns current UTC time as ISO8601 string. Use when asked about time.\n" +
-		"To use a tool, respond with a JSON object: {\"tool\": \"<name>\", \"args\": {\"message\": \"...\"}}\n" +
-		"If no tool is needed, respond directly with helpful text.\n" +
-		"Always be concise and accurate."
+
+	reg, err := agent.LoadRegistry()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not load tool registry: %v\n", err)
+		reg = &agent.Registry{}
+	}
+	systemPrompt := reg.BuildSystemPrompt()
 
 	messages := []llm.ChatMessage{
 		{Role: "system", Content: systemPrompt},
@@ -543,7 +570,7 @@ Available tools: echo, utc_time`)
 		os.Exit(1)
 	}
 
-	result := handleToolCall(response)
+	result := handleToolCallRegistry(response, reg)
 	al.Append(fmt.Sprintf("agent_response: model=%s response=%s", model, truncate(result, 200)))
 
 	if g.JSON {
@@ -558,7 +585,7 @@ Available tools: echo, utc_time`)
 	}
 }
 
-func handleToolCall(response string) string {
+func handleToolCallRegistry(response string, reg *agent.Registry) string {
 	var toolCall struct {
 		Tool string         `json:"tool"`
 		Args map[string]any `json:"args"`
@@ -566,18 +593,15 @@ func handleToolCall(response string) string {
 
 	jsonStr := court.ExtractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &toolCall); err == nil && toolCall.Tool != "" {
-		switch toolCall.Tool {
-		case "echo":
-			msg, _ := toolCall.Args["message"].(string)
-			if msg == "" {
-				msg = "echo"
-			}
-			return msg
-		case "utc_time":
-			return time.Now().UTC().Format(time.RFC3339)
-		default:
-			return fmt.Sprintf("Unknown tool: %s -- Blocked: Rule 3", toolCall.Tool)
+		argStr := ""
+		if msg, ok := toolCall.Args["message"].(string); ok {
+			argStr = msg
 		}
+		result, err := agent.ExecuteTool(reg, toolCall.Tool, argStr)
+		if err != nil {
+			return fmt.Sprintf("Tool error: %v -- Blocked: Rule 3", err)
+		}
+		return result
 	}
 	return response
 }
@@ -1151,7 +1175,17 @@ func cmdCourtVote(g *Globals, args []string) {
 
 	fmt.Printf("Vote recorded: %s on proposal %s\n", action, proposalID)
 	if action == "approve" {
-		fmt.Println("Mutation applied.")
+		eng := newMutationEngine(al)
+		m, err := eng.Apply(proposalID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Mutation failed: %v\n", err)
+			if m != nil {
+				fmt.Fprintf(os.Stderr, "Mutation %s status: %s\n", m.ID, m.Status)
+			}
+			os.Exit(1)
+		}
+		fmt.Printf("Mutation applied: %s (type=%s)\n", m.ID, m.Type)
+		fmt.Printf("Snapshot: %s\n", m.BeforeSnapshot)
 	}
 }
 
@@ -1193,6 +1227,22 @@ Show runtime overview: resources, pending proposals, Court state.`)
 		}
 	}
 	fmt.Printf("Proposals: %d pending, %d reviewed, %d decided\n", pending, active, completed)
+
+	// Show last mutation
+	lastMut, _ := mutation.LastAppliedMutation()
+	if lastMut != nil {
+		fmt.Printf("\nLast mutation: %s (%s)\n", lastMut.ID, lastMut.Type)
+		fmt.Printf("  Title: %s\n", lastMut.Title)
+		fmt.Printf("  Applied: %s\n", lastMut.AppliedAt.Format(time.RFC3339))
+	}
+
+	// Check halt marker
+	dir, _ := keys.AegisCourtDir()
+	if dir != "" {
+		if _, err := os.Stat(filepath.Join(dir, "HALTED")); err == nil {
+			fmt.Println("\n*** SYSTEM IS HALTED — restart with: aegiscourt start ***")
+		}
+	}
 
 	notifs, _ := notify.Recent(5)
 	if len(notifs) > 0 {
@@ -1339,39 +1389,33 @@ Flags:
 	al := mustInitAudit()
 
 	if g.DryRun {
-		fmt.Printf("Would rollback mutation: %s\n", target)
+		if target == "last" {
+			m, err := mutation.LastAppliedMutation()
+			if err != nil || m == nil {
+				fmt.Println("No applied mutations to rollback.")
+				return
+			}
+			fmt.Printf("Would rollback mutation: %s (%s)\n", m.ID, m.Title)
+		} else {
+			fmt.Printf("Would rollback mutation: %s\n", target)
+		}
 		return
 	}
 
-	al.Append(fmt.Sprintf("rollback: target=%s", target))
+	eng := newMutationEngine(al)
 
 	if target == "last" {
-		// Find last approved proposal
-		results, _ := court.ListResults("")
-		found := false
-		for i := len(results) - 1; i >= 0; i-- {
-			if results[i].Status == court.StatusApproved {
-				results[i].Status = court.StatusRejected
-				results[i].VoteNotes = "rolled back"
-				court.SaveResult(results[i])
-				fmt.Printf("Rolled back proposal %s: %s\n", results[i].ProposalID, results[i].ProposalTitle)
-				found = true
-				break
-			}
-		}
-		if !found {
-			fmt.Println("No approved mutations to rollback.")
-		}
-	} else {
-		result, err := court.LoadResult(target)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if err := eng.RollbackLast(); err != nil {
+			fmt.Fprintf(os.Stderr, "Rollback failed: %v\n", err)
 			os.Exit(1)
 		}
-		result.Status = court.StatusRejected
-		result.VoteNotes = "rolled back"
-		court.SaveResult(result)
-		fmt.Printf("Rolled back proposal %s: %s\n", result.ProposalID, result.ProposalTitle)
+		fmt.Println("Last mutation rolled back successfully.")
+	} else {
+		if err := eng.Rollback(target); err != nil {
+			fmt.Fprintf(os.Stderr, "Rollback failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Mutation %s rolled back successfully.\n", target)
 	}
 }
 
@@ -1444,16 +1488,17 @@ Emergency freeze: stop all agents, rollback last mutation, enter read-only mode.
 	al := mustInitAudit()
 	al.Append("emergency_halt")
 
-	// Rollback last
-	results, _ := court.ListResults("")
-	for i := len(results) - 1; i >= 0; i-- {
-		if results[i].Status == court.StatusApproved {
-			results[i].Status = court.StatusRejected
-			results[i].VoteNotes = "emergency halt rollback"
-			court.SaveResult(results[i])
-			fmt.Printf("Rolled back: %s\n", results[i].ProposalTitle)
-			break
-		}
+	eng := newMutationEngine(al)
+	if err := eng.RollbackLast(); err != nil {
+		fmt.Printf("Rollback note: %v\n", err)
+	} else {
+		fmt.Println("Last mutation rolled back.")
+	}
+
+	// Write halt marker file
+	dir, _ := keys.AegisCourtDir()
+	if dir != "" {
+		os.WriteFile(filepath.Join(dir, "HALTED"), []byte(time.Now().UTC().Format(time.RFC3339)), 0600)
 	}
 
 	fmt.Println("EMERGENCY HALT ACTIVATED")
