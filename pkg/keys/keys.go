@@ -15,6 +15,9 @@ import (
 const RootPublicKeyHex = ""
 
 func AegisCourtDir() (string, error) {
+	if dir := os.Getenv("AEGISCOURT_HOME"); dir != "" {
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
