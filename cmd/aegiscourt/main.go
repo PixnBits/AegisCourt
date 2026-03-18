@@ -187,18 +187,6 @@ func mustInitRouter(cfg *config.Config) *llm.Router {
 	fallback := "llama3.2:latest"
 	return llm.NewRouter(cfg.LLMEndpoint, cfg.PreferredLLM, fallback)
 }
-newMutationEngine(al *audit.Log) *mutation.Engine {
-	eng := mutation.NewEngine(al)
-	eng.RegisterHandler("add-tool", &handlers.ToolHandler{})
-	eng.RegisterHandler("change-prompt", &handlers.PromptHandler{})
-	eng.RegisterHandler("amend-rule", &handlers.ConstitutionHandler{})
-	eng.RegisterHandler("add-skill", &handlers.SkillHandler{})
-	eng.RegisterHandler("upgrade-memory", &handlers.MemoryHandler{})
-	eng.RegisterHandler("other", &handlers.GenericHandler{})
-	return eng
-}
-
-func 
 func newMutationEngine(al *audit.Log) *mutation.Engine {
 	eng := mutation.NewEngine(al)
 	eng.RegisterHandler("add-tool", &handlers.ToolHandler{})
@@ -939,6 +927,7 @@ func cmdProposeSubmit(g *Globals, args []string) {
 		fmt.Fprintf(os.Stderr, "Court error: %v\n", err)
 		os.Exit(1)
 	}
+	result.DraftID = draftID
 
 	if err := court.SaveResult(result); err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving court result: %v\n", err)

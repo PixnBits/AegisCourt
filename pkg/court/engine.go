@@ -26,6 +26,7 @@ const (
 
 type CourtResult struct {
 	ProposalID      string           `json:"proposal_id"`
+	DraftID         string           `json:"draft_id,omitempty"`
 	ProposalTitle   string           `json:"proposal_title"`
 	Status          ProposalStatus   `json:"status"`
 	CourtMode       string           `json:"court_mode"`

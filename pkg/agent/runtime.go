@@ -115,9 +115,10 @@ func (r *Registry) BuildSystemPrompt() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("When you need to use a tool, respond with:\n")
-	b.WriteString("TOOL_CALL: <tool_name> <arguments>\n\n")
-	b.WriteString("Always explain your reasoning before and after tool use.\n")
+	b.WriteString("When you need to use a tool, respond ONLY with a JSON object:\n")
+	b.WriteString(`{"tool": "<tool_name>", "args": {"message": "..."}}` + "\n")
+	b.WriteString("If no tool is needed, respond directly with helpful text.\n")
+	b.WriteString("Be concise and accurate.\n")
 
 	// Load custom agent prompt if exists
 	if custom := loadCustomPrompt(); custom != "" {

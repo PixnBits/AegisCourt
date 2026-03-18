@@ -39,7 +39,11 @@ func (e *Engine) Apply(proposalID string) (*Mutation, error) {
 	}
 
 	// 2. Load the proposal draft
-	draft, err := proposal.LoadDraft(proposalID)
+	draftID := cr.DraftID
+	if draftID == "" {
+		draftID = proposalID
+	}
+	draft, err := proposal.LoadDraft(draftID)
 	if err != nil {
 		return nil, fmt.Errorf("load draft: %w", err)
 	}
@@ -118,6 +122,11 @@ func (e *Engine) Rollback(mutationID string) error {
 
 	if err := RestoreSnapshot(m.BeforeSnapshot); err != nil {
 		return fmt.Errorf("restore snapshot: %w", err)
+	}
+
+	// Also call handler-specific rollback for files not in snapshot
+	if handler, ok := e.Handlers[m.Type]; ok {
+		handler.Rollback(m)
 	}
 
 	m.Status = StatusRolled
